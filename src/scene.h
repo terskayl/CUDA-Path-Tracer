@@ -7,6 +7,7 @@ class Scene
 {
 private:
     void loadFromJSON(const std::string& jsonName);
+    bool loadFromGLTF(const std::string& gltfName, bool isBinary);
 public:
     Scene(std::string filename);
 

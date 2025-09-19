@@ -152,6 +152,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
         );
 
+        //segment.ray.direction += (cam.right * cam.pixelLength * (2 * rng - 1) + cam.up * cam.pixelLength.y * (2 * rng - 1))
+
         segment.pixelIndex = index;
         segment.remainingBounces = traceDepth;
     }
