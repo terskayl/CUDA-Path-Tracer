@@ -111,3 +111,77 @@ __host__ __device__ float sphereIntersectionTest(
 
     return glm::length(r.origin - intersectionPoint);
 }
+
+
+__host__ __device__ float triangleIntersectionTest(
+    glm::vec3 p1,
+    glm::vec3 p2,
+    glm::vec3 p3,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& notBackface)
+{
+
+    assert(abs(glm::length(r.direction) - 1) < 0.01);
+    glm::vec3 v12 = p2 - p1;
+    glm::vec3 v13 = p3 - p1;
+    normal = glm::normalize(glm::cross(v12, v13));
+
+    // Find Ray intersection with plane of triangle
+    float dist = glm::dot(p1 - r.origin, normal);
+    // how much closer the ray move per time t?
+    float step = glm::dot(r.direction, normal);
+    if (abs(step) < 0.0001) {
+        return -1; // Ray direction is parallel to the triangle
+    }
+    notBackface = true;
+    if (step > 0) {
+        normal *= -1; // I presume we want normal facing towards ray anyways
+        notBackface = false;
+    }
+
+    float t = dist / step;
+
+    if (t < 0) {
+        return -1; // Plane intersection point is behind the ray origin - hmm. Or backface
+    }
+
+    intersectionPoint = r.origin + t * r.direction;
+
+    // Barycentric check to determine if inside triangle.
+    // Let planeIntersectionPoint be denoted as s.
+    float areaS12 = abs(glm::length(glm::cross(v12, intersectionPoint - p1)));
+    float areaS23 = abs(glm::length(glm::cross(p3 - p2, intersectionPoint - p2)));
+    float areaS31 = abs(glm::length(glm::cross(intersectionPoint - p1, v13)));
+
+    float area123 = abs(glm::length(glm::cross(v12, v13)));
+
+    if (area123 - areaS12 - areaS23 - areaS31 < 0.0001) {
+        return t;
+    }
+    return -1;
+
+}
+
+// TODO
+__host__ __device__ float meshIntersectionTestNaive(
+    Geom mesh,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    return -1;
+}
+
+// TODO
+__host__ __device__ float meshIntersectionTestBVH(
+    Geom mesh,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside)
+{
+    return -1;
+}

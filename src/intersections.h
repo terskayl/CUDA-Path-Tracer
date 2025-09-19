@@ -71,3 +71,52 @@ __host__ __device__ float sphereIntersectionTest(
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside);
+
+/**
+* Tests intersection between a ray and a triangle in world space. The triangle
+* is defined by points p1, p2, and p3.
+*  
+* @param intersectionPoint  Output parameter for point of intersection
+* @param normal             Output parameter for surface normal.
+* @param backface           Output if ray intersects frontface of triangle
+*                               rather than the backface
+* @return                   Ray parameter `t` value. -1 if no intersection.
+*/
+__host__ __device__ float triangleIntersectionTest(
+    glm::vec3 p1,
+    glm::vec3 p2,
+    glm::vec3 p3,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& notBackface);
+
+/**
+* Tests intersection between a ray and a transformed triangle mesh naively
+*
+* @param intersectionPoint  Output parameter for point of intersection.
+* @param normal             Output parameter for surface normal.
+* @param outside            Output param for whether the ray came from outside.
+* @return                   Ray parameter `t` value. -1 if no intersection.
+*/
+__host__ __device__ float meshIntersectionTestNaive(
+    Geom mesh,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside);
+
+/**
+* Tests intersection between a ray and a transformed triangle mesh with BVH traversal
+* 
+* @param intersectionPoint  Output parameter for point of intersection.
+* @param normal             Output parameter for surface normal.
+* @param outside            Output param for whether the ray came from outside.
+* @return                   Ray parameter `t` value. -1 if no intersection.
+*/
+__host__ __device__ float meshIntersectionTestBVH(
+    Geom mesh,
+    Ray r,
+    glm::vec3& intersectionPoint,
+    glm::vec3& normal,
+    bool& outside);

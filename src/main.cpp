@@ -4,6 +4,7 @@
 #include "scene.h"
 #include "sceneStructs.h"
 #include "utilities.h"
+#include "intersections.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -25,6 +26,9 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <chrono>
+
+#define TESTS 0
 
 static std::string startTimeString;
 
@@ -337,12 +341,73 @@ void mainLoop()
 }
 
 //-------------------------------
+//------------TESTS--------------
+//-------------------------------
+
+void triangleTest() {
+    Ray r = Ray();
+    r.origin = glm::vec3(0, 0, 10);
+    r.direction = glm::vec3(0, 0, -1);
+
+    glm::vec3 intersectionPoint;
+    glm::vec3 normal;
+    bool notBackface;
+                                        // NOTE CCW
+    float t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0) , glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t != -1);
+
+    printf("Intersection Point: %f, %f, %f. Normal: %f, %f, %f. Frontface?: %i. t=%f",
+        intersectionPoint[0], intersectionPoint[1], intersectionPoint[2],
+        normal[0], normal[1], normal[2], notBackface, t);
+
+    //rng
+
+    //run 1 million times.
+    std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
+
+
+    for (int i = 0; i < 1000000; ++i) {
+        r.direction = glm::normalize(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
+        if (glm::length(r.direction) - 1 > 0.01 || !r.direction[0]) {
+            r.direction = glm::vec3(1, 0, 0);
+        }
+        r.origin = glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+        float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            r, intersectionPoint, normal, notBackface);
+    }
+
+    std::string endTimeString = currentTimeString();
+
+    std::chrono::high_resolution_clock::time_point time_end_cpu = std::chrono::high_resolution_clock::now();
+
+
+    std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
+    float prev_elapsed_time_cpu_milliseconds =
+        static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
+
+    // TODO DO TIMING
+    printf("\n");
+    printf("Time Taken: %fms", prev_elapsed_time_cpu_milliseconds);
+    printf("\n");
+
+}
+
+//-------------------------------
 //-------------MAIN--------------
 //-------------------------------
 
 int main(int argc, char** argv)
 {
     startTimeString = currentTimeString();
+
+    // Testing Area
+    #if TESTS
+    triangleTest();
+
+    #endif  
 
     if (argc < 2)
     {
