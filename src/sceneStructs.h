@@ -22,6 +22,60 @@ struct Ray
     glm::vec3 direction;
 };
 
+struct BvhNode
+{
+    glm::vec3 maxBounds;
+    glm::vec3 minBounds;
+    unsigned short leftChild;
+    unsigned short rightChild;
+    int trisOffset;
+    int trisLength;
+};
+
+struct Mesh
+{
+    // Geometry buffers
+    glm::vec3* pos;
+    size_t posCount;
+    glm::vec3* nor;
+    size_t norCount;
+    glm::vec2* uv;
+    size_t uvCount;
+    unsigned short* ind;
+    size_t indCount;
+
+    //BVH
+    size_t numBvhNodes;
+    BvhNode* bvhRoot;
+    // indices reordered, still form same tris
+    unsigned short* indBVH;
+
+    __host__ __device__ ~Mesh() {
+
+#ifndef __CUDA_ARCH__
+        delete[] pos;
+        delete[] nor;
+        delete[] uv;
+        delete[] ind;
+
+        //delete[] bvhRoot;
+        //delete[] indBVH;
+#endif
+
+#ifdef __CUDA_ARCH__ // Need to check these are like being used then ---
+        cudaFree(pos);
+        cudaFree(nor);
+        cudaFree(uv);
+        cudaFree(ind);
+
+        cudaFree(bvhRoot);
+        cudaFree(indBVH);
+#endif
+    }
+
+};
+
+
 struct Geom
 {
     enum GeomType type;
@@ -33,14 +87,7 @@ struct Geom
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;
 
-    glm::vec3* pos;
-    size_t posCount;
-    glm::vec3* nor;
-    size_t norCount;
-    glm::vec2* uv;
-    size_t uvCount;
-    unsigned short* ind;
-    size_t indCount;
+    Mesh mesh;
 };
 
 struct Material

@@ -16,6 +16,7 @@
 #include <iostream>
 #include <string>
 #include <unordered_map>
+#include <deque>
 
 using namespace std;
 using json = nlohmann::json;
@@ -225,9 +226,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
                     tinygltf::Buffer buffer = model.buffers[bufferId];
                     
-                    newGeom.pos = new glm::vec3[count];
-                    newGeom.posCount = count;
-                    std::memcpy(newGeom.pos, buffer.data.data() + byteOffset, byteLength);
+                    newGeom.mesh.pos = new glm::vec3[count];
+                    newGeom.mesh.posCount = count;
+                    std::memcpy(newGeom.mesh.pos, buffer.data.data() + byteOffset, byteLength);
                 }
                 if (prim.attributes.count("NORMAL") > 0) {
                     int accessorId = prim.attributes["NORMAL"];
@@ -245,9 +246,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
                     tinygltf::Buffer buffer = model.buffers[bufferId];
 
-                    newGeom.nor = new glm::vec3[count];
-                    newGeom.norCount = count;
-                    std::memcpy(newGeom.nor, buffer.data.data() + byteOffset, byteLength);
+                    newGeom.mesh.nor = new glm::vec3[count];
+                    newGeom.mesh.norCount = count;
+                    std::memcpy(newGeom.mesh.nor, buffer.data.data() + byteOffset, byteLength);
 
                 }
                 if (prim.attributes.count("TEXCOORD_0") > 0) {
@@ -266,9 +267,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
                     tinygltf::Buffer buffer = model.buffers[bufferId];
 
-                    newGeom.uv = new glm::vec2[count];
-                    newGeom.uvCount = count;
-                    std::memcpy(newGeom.uv, buffer.data.data() + byteOffset, byteLength);
+                    newGeom.mesh.uv = new glm::vec2[count];
+                    newGeom.mesh.uvCount = count;
+                    std::memcpy(newGeom.mesh.uv, buffer.data.data() + byteOffset, byteLength);
 
                 }
 
@@ -289,28 +290,31 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
                     tinygltf::Buffer buffer = model.buffers[bufferId];
 
-                    newGeom.ind = new unsigned short[count];
-                    newGeom.indCount = count;
-                    std::memcpy(newGeom.ind, buffer.data.data() + byteOffset, byteLength);
+                    newGeom.mesh.ind = new unsigned short[count];
+                    newGeom.mesh.indCount = count;
+                    std::memcpy(newGeom.mesh.ind, buffer.data.data() + byteOffset, byteLength);
                 }
             }
 
-            for (int i = 0; i < newGeom.posCount; ++i) {
-                glm::vec3 v = newGeom.pos[i];
+            for (int i = 0; i < newGeom.mesh.posCount; ++i) {
+                glm::vec3 v = newGeom.mesh.pos[i];
                 std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
             }
-            for (int i = 0; i < newGeom.norCount; ++i) {
-                glm::vec3 v = newGeom.nor[i];
+            for (int i = 0; i < newGeom.mesh.norCount; ++i) {
+                glm::vec3 v = newGeom.mesh.nor[i];
                 std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
             }
-            for (int i = 0; i < newGeom.uvCount; ++i) {
-                glm::vec2 v = newGeom.uv[i];
+            for (int i = 0; i < newGeom.mesh.uvCount; ++i) {
+                glm::vec2 v = newGeom.mesh.uv[i];
                 std::cout << v.r << ", " << v.g << std::endl;
             }
-            for (int i = 0; i < newGeom.indCount; ++i) {
-                unsigned short s = newGeom.ind[i];
+            for (int i = 0; i < newGeom.mesh.indCount; ++i) {
+                unsigned short s = newGeom.mesh.ind[i];
                 std::cout << s << std::endl;
             }
+
+            buildBVH(newGeom.mesh);
+
             geoms.push_back(newGeom);
         }
 
@@ -318,8 +322,196 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             // TODO CAMERA
         }
     }
+}
+
+void Scene::buildBVH(const Mesh& mesh) {
+    int n = mesh.indCount / 3;
+    assert(mesh.indCount % 3 == 0); // TRUE FOR AS LONG AS WE USE GL_TRIANGLES
+
+    // TEST
+    glm::vec3 v1 = glm::vec3(1, 2, 3);
+    glm::vec3 v2 = glm::vec3(3, 2, 1);
+    assert(glm::vec3(3, 2, 3) == glm::max(v1, v2));
+
+    assert(mesh.posCount > 0);
+    glm::vec3 maxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
+    glm::vec3 minBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
+
+    for (int i = 0; i < mesh.posCount; ++i) {
+        maxBounds = glm::max(maxBounds, mesh.pos[i]);
+        minBounds = glm::min(minBounds, mesh.pos[i]);
+    }
+
+    struct Triangle {
+        glm::vec3 points[3];
+        int ind[3];
+    };
+
+    struct CpuBvhNode{
+        std::vector<Triangle> tri;
+        CpuBvhNode* lChild;
+        CpuBvhNode* rChild;
+        glm::vec3 maxBounds;
+        glm::vec3 minBounds;
+
+        CpuBvhNode() {
+            tri = std::vector<Triangle>();
+            lChild = nullptr;
+            rChild = nullptr;
+        };
+
+        CpuBvhNode(std::vector<Triangle> tri) {
+            tri = tri;
+            lChild = nullptr;
+            rChild = nullptr;
+        }
+    };
+
+    //queue of tree nodes for processing
+    std::deque<CpuBvhNode*> nodesToProcess = std::deque<CpuBvhNode*>();
+
+    std::vector<Triangle> tri = std::vector<Triangle>();
+    for (int i = 0; i < n; ++i) {
+        Triangle currTri = Triangle();
+        currTri.ind[0] = mesh.ind[3 * i];
+        currTri.ind[1] = mesh.ind[3 * i + 1];
+        currTri.ind[2] = mesh.ind[3 * i + 2];
+        currTri.points[0] = mesh.pos[currTri.ind[0]];
+        currTri.points[1] = mesh.pos[currTri.ind[1]];
+        currTri.points[2] = mesh.pos[currTri.ind[2]];
+        tri.push_back(currTri);
+    }
 
 
+    CpuBvhNode root = CpuBvhNode();
 
+    root.tri = tri;
+    root.maxBounds = maxBounds;
+    root.minBounds = minBounds;
+
+    nodesToProcess.push_back(&root);
+    const int BVH_MAX_LAYERS = 20;
+    for (int i = 0; i < BVH_MAX_LAYERS; ++i) {
+        int layerSize = 0;
+        for (CpuBvhNode* nodePtr : nodesToProcess) {
+            // Find axis to split
+            int axisToSplit = 0;
+            if (nodePtr->maxBounds.y - nodePtr->minBounds.y > nodePtr->maxBounds.x - nodePtr->minBounds.x) {
+                axisToSplit += 1;
+                if (nodePtr->maxBounds.z - nodePtr->minBounds.z > nodePtr->maxBounds.y - nodePtr->minBounds.x) {
+                    axisToSplit += 1;
+                }
+            }
+            else if (nodePtr->maxBounds.z - nodePtr->minBounds.z > nodePtr->maxBounds.x - nodePtr->minBounds.x) {
+                axisToSplit += 2;
+            }
+            // Split bounding boxes - just middle
+            float splitPos = (nodePtr->maxBounds[axisToSplit] + nodePtr->minBounds[axisToSplit]) / 2;
+            glm::vec3 bb1MaxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
+            glm::vec3 bb1MinBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
+            glm::vec3 bb2MaxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
+            glm::vec3 bb2MinBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
+
+            std::vector<Triangle> bb1tris = std::vector<Triangle>();
+            std::vector<Triangle> bb2tris = std::vector<Triangle>();
+            for (int j = 0; j < nodePtr->tri.size(); j++) {
+                Triangle currTri= nodePtr->tri[j];
+                glm::vec3 *pts = currTri.points;
+                glm::vec3 centroid = (pts[0] + pts[1] + pts[2]);
+                centroid /= 3;
+
+                if (centroid[axisToSplit] > splitPos) {
+                    // put in 1
+                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[0]);
+                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[1]);
+                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[2]);
+                    bb1MinBounds = glm::min(bb1MinBounds, pts[0]);
+                    bb1MinBounds = glm::min(bb1MinBounds, pts[1]);
+                    bb1MinBounds = glm::min(bb1MinBounds, pts[2]);
+                    bb1tris.push_back(currTri);
+                }
+                else {
+                    // put in 2
+                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[0]);
+                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[1]);
+                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[2]);
+                    bb2MinBounds = glm::min(bb2MinBounds, pts[0]);
+                    bb2MinBounds = glm::min(bb2MinBounds, pts[1]);
+                    bb2MinBounds = glm::min(bb2MinBounds, pts[2]);
+                    bb2tris.push_back(currTri);
+                }
+
+            }
+                
+            if (bb1tris.size() == 0 || bb2tris.size() == 0) {
+                continue;
+            }
+            CpuBvhNode& lChild = *(new CpuBvhNode(bb1tris));
+            CpuBvhNode& rChild = *(new CpuBvhNode(bb2tris));
+            lChild.maxBounds = bb1MaxBounds;
+            lChild.minBounds = bb1MinBounds;
+            rChild.maxBounds = bb2MaxBounds;
+            rChild.minBounds = bb2MinBounds;
+            
+            lChild.tri = bb1tris;
+            rChild.tri = bb2tris;
+
+            nodePtr->lChild = &lChild;
+            nodePtr->rChild = &rChild;
+
+            // TODO - can optimize order?
+            nodesToProcess.push_back(&lChild);
+            nodesToProcess.push_back(&rChild);
+
+            layerSize += 1;
+        }
+        for (int i = 0; i < layerSize; ++i) {
+            nodesToProcess.pop_front();
+        }
+    }
+
+    // Testing
+    std::deque<CpuBvhNode> nodesToPrint = std::deque<CpuBvhNode>();
+    nodesToPrint.push_back(root);
+
+    while (!nodesToPrint.empty()) {
+        CpuBvhNode currNode = nodesToPrint[0];
+        nodesToPrint.pop_front();
+        if (currNode.lChild != nullptr) {
+            nodesToPrint.push_back(*currNode.lChild);
+        }
+        if (currNode.rChild != nullptr) {
+            nodesToPrint.push_back(*currNode.rChild);
+        }
+        if (currNode.lChild == nullptr && currNode.rChild == nullptr) {
+            printf("New Node:\n");
+            printf("Bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n", currNode.minBounds[0],
+                currNode.maxBounds[0], currNode.minBounds[1], currNode.maxBounds[1],
+                currNode.minBounds[2], currNode.maxBounds[2]);
+            if (currNode.lChild != nullptr) {
+                printf("Has left child with bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n",
+                    currNode.lChild->minBounds[0], currNode.lChild->maxBounds[0], currNode.lChild->minBounds[1], currNode.lChild->maxBounds[1],
+                    currNode.lChild->minBounds[2], currNode.lChild->maxBounds[2]);
+                nodesToPrint.push_back(*currNode.lChild);
+            }
+            if (currNode.rChild != nullptr) {
+                printf("Has right child with bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n",
+                    currNode.rChild->minBounds[0], currNode.rChild->maxBounds[0], currNode.rChild->minBounds[1], currNode.rChild->maxBounds[1],
+                    currNode.rChild->minBounds[2], currNode.rChild->maxBounds[2]);
+                nodesToPrint.push_back(*currNode.rChild);
+            }
+
+            printf("Tris: ");
+            for (Triangle t : currNode.tri) {
+                printf("[(%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f)], ",
+                    t.points[0][0], t.points[0][1], t.points[0][2],
+                    t.points[1][0], t.points[1][1], t.points[1][2],
+                    t.points[2][0], t.points[2][1], t.points[2][2]);
+            }
+            printf("\n");
+        }
+    }
+    // END TESTING
+    // TODO: NEED TO FREE CPUBVHNODE TREE
 
 }
