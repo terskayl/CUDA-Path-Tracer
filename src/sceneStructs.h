@@ -35,20 +35,21 @@ struct BvhNode
 struct Mesh
 {
     // Geometry buffers
-    glm::vec3* pos;
+    glm::vec3* pos = nullptr;
     size_t posCount;
-    glm::vec3* nor;
+    glm::vec3* nor = nullptr;
     size_t norCount;
-    glm::vec2* uv;
+    glm::vec2* uv = nullptr;
     size_t uvCount;
-    unsigned short* ind;
+    unsigned short* ind = nullptr;
     size_t indCount;
 
     //BVH
     size_t numBvhNodes;
-    BvhNode* bvhRoot;
+    // BVH root at bvhNodes[0]
+    BvhNode* bvhNodes = nullptr;
     // indices reordered, still form same tris
-    unsigned short* indBVH;
+    unsigned short* indBVH = nullptr;
 
     __host__ __device__ ~Mesh() {
 
@@ -58,18 +59,18 @@ struct Mesh
         delete[] uv;
         delete[] ind;
 
-        //delete[] bvhRoot;
-        //delete[] indBVH;
+        delete[] bvhNodes;
+        delete[] indBVH;
 #endif
 
 #ifdef __CUDA_ARCH__ // Need to check these are like being used then ---
-        cudaFree(pos);
-        cudaFree(nor);
-        cudaFree(uv);
-        cudaFree(ind);
+        //cudaFree(pos);
+        //cudaFree(nor);
+        //cudaFree(uv);
+        //cudaFree(ind);
 
-        cudaFree(bvhRoot);
-        cudaFree(indBVH);
+        //cudaFree(bvhRoot);
+        //cudaFree(indBVH);
 #endif
     }
 

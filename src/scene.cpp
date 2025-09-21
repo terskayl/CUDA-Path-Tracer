@@ -21,6 +21,9 @@
 using namespace std;
 using json = nlohmann::json;
 
+template <typename T>
+using uPtr = std::unique_ptr<T>;
+
 Scene::Scene(string filename)
 {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -324,53 +327,16 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     }
 }
 
-void Scene::buildBVH(const Mesh& mesh) {
+void Scene::buildBVH(Mesh& mesh) {
     int n = mesh.indCount / 3;
     assert(mesh.indCount % 3 == 0); // TRUE FOR AS LONG AS WE USE GL_TRIANGLES
-
-    // TEST
-    glm::vec3 v1 = glm::vec3(1, 2, 3);
-    glm::vec3 v2 = glm::vec3(3, 2, 1);
-    assert(glm::vec3(3, 2, 3) == glm::max(v1, v2));
-
     assert(mesh.posCount > 0);
-    glm::vec3 maxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
-    glm::vec3 minBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
 
-    for (int i = 0; i < mesh.posCount; ++i) {
-        maxBounds = glm::max(maxBounds, mesh.pos[i]);
-        minBounds = glm::min(minBounds, mesh.pos[i]);
-    }
-
-    struct Triangle {
-        glm::vec3 points[3];
-        int ind[3];
-    };
-
-    struct CpuBvhNode{
-        std::vector<Triangle> tri;
-        CpuBvhNode* lChild;
-        CpuBvhNode* rChild;
-        glm::vec3 maxBounds;
-        glm::vec3 minBounds;
-
-        CpuBvhNode() {
-            tri = std::vector<Triangle>();
-            lChild = nullptr;
-            rChild = nullptr;
-        };
-
-        CpuBvhNode(std::vector<Triangle> tri) {
-            tri = tri;
-            lChild = nullptr;
-            rChild = nullptr;
-        }
-    };
-
-    //queue of tree nodes for processing
+    // Queue of tree nodes for processing
     std::deque<CpuBvhNode*> nodesToProcess = std::deque<CpuBvhNode*>();
 
-    std::vector<Triangle> tri = std::vector<Triangle>();
+    // Assemble triangle array
+    std::vector<Triangle> rootTri = std::vector<Triangle>();
     for (int i = 0; i < n; ++i) {
         Triangle currTri = Triangle();
         currTri.ind[0] = mesh.ind[3 * i];
@@ -379,38 +345,24 @@ void Scene::buildBVH(const Mesh& mesh) {
         currTri.points[0] = mesh.pos[currTri.ind[0]];
         currTri.points[1] = mesh.pos[currTri.ind[1]];
         currTri.points[2] = mesh.pos[currTri.ind[2]];
-        tri.push_back(currTri);
+        rootTri.push_back(currTri);
     }
 
+    auto [rootMaxBounds, rootMinBounds] = findBBoxOfTris(rootTri);
 
-    CpuBvhNode root = CpuBvhNode();
+    uPtr<CpuBvhNode> root = std::make_unique<CpuBvhNode>();
 
-    root.tri = tri;
-    root.maxBounds = maxBounds;
-    root.minBounds = minBounds;
+    root->tri = rootTri;
+    root->maxBounds = rootMaxBounds;
+    root->minBounds = rootMinBounds;
 
-    nodesToProcess.push_back(&root);
+    nodesToProcess.push_back(root.get());
+
     const int BVH_MAX_LAYERS = 20;
     for (int i = 0; i < BVH_MAX_LAYERS; ++i) {
         int layerSize = 0;
         for (CpuBvhNode* nodePtr : nodesToProcess) {
-            // Find axis to split
-            int axisToSplit = 0;
-            if (nodePtr->maxBounds.y - nodePtr->minBounds.y > nodePtr->maxBounds.x - nodePtr->minBounds.x) {
-                axisToSplit += 1;
-                if (nodePtr->maxBounds.z - nodePtr->minBounds.z > nodePtr->maxBounds.y - nodePtr->minBounds.x) {
-                    axisToSplit += 1;
-                }
-            }
-            else if (nodePtr->maxBounds.z - nodePtr->minBounds.z > nodePtr->maxBounds.x - nodePtr->minBounds.x) {
-                axisToSplit += 2;
-            }
-            // Split bounding boxes - just middle
-            float splitPos = (nodePtr->maxBounds[axisToSplit] + nodePtr->minBounds[axisToSplit]) / 2;
-            glm::vec3 bb1MaxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
-            glm::vec3 bb1MinBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
-            glm::vec3 bb2MaxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
-            glm::vec3 bb2MinBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
+            auto [axisToSplit, splitPos] = findSplitPoint(nodePtr);
 
             std::vector<Triangle> bb1tris = std::vector<Triangle>();
             std::vector<Triangle> bb2tris = std::vector<Triangle>();
@@ -422,22 +374,10 @@ void Scene::buildBVH(const Mesh& mesh) {
 
                 if (centroid[axisToSplit] > splitPos) {
                     // put in 1
-                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[0]);
-                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[1]);
-                    bb1MaxBounds = glm::max(bb1MaxBounds, pts[2]);
-                    bb1MinBounds = glm::min(bb1MinBounds, pts[0]);
-                    bb1MinBounds = glm::min(bb1MinBounds, pts[1]);
-                    bb1MinBounds = glm::min(bb1MinBounds, pts[2]);
                     bb1tris.push_back(currTri);
                 }
                 else {
                     // put in 2
-                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[0]);
-                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[1]);
-                    bb2MaxBounds = glm::max(bb2MaxBounds, pts[2]);
-                    bb2MinBounds = glm::min(bb2MinBounds, pts[0]);
-                    bb2MinBounds = glm::min(bb2MinBounds, pts[1]);
-                    bb2MinBounds = glm::min(bb2MinBounds, pts[2]);
                     bb2tris.push_back(currTri);
                 }
 
@@ -446,22 +386,26 @@ void Scene::buildBVH(const Mesh& mesh) {
             if (bb1tris.size() == 0 || bb2tris.size() == 0) {
                 continue;
             }
-            CpuBvhNode& lChild = *(new CpuBvhNode(bb1tris));
-            CpuBvhNode& rChild = *(new CpuBvhNode(bb2tris));
-            lChild.maxBounds = bb1MaxBounds;
-            lChild.minBounds = bb1MinBounds;
-            rChild.maxBounds = bb2MaxBounds;
-            rChild.minBounds = bb2MinBounds;
-            
-            lChild.tri = bb1tris;
-            rChild.tri = bb2tris;
 
-            nodePtr->lChild = &lChild;
-            nodePtr->rChild = &rChild;
+            auto [bb1MaxBounds, bb1MinBounds] = findBBoxOfTris(bb1tris);
+            auto [bb2MaxBounds, bb2MinBounds] = findBBoxOfTris(bb2tris);
+
+            uPtr<CpuBvhNode>& lChild = std::make_unique<CpuBvhNode>(bb1tris);
+            uPtr<CpuBvhNode>& rChild = std::make_unique<CpuBvhNode>(bb2tris);
+            lChild->maxBounds = bb1MaxBounds;
+            lChild->minBounds = bb1MinBounds;
+            rChild->maxBounds = bb2MaxBounds;
+            rChild->minBounds = bb2MinBounds;
+            
+            lChild->tri = bb1tris;
+            rChild->tri = bb2tris;
 
             // TODO - can optimize order?
-            nodesToProcess.push_back(&lChild);
-            nodesToProcess.push_back(&rChild);
+            nodesToProcess.push_back(lChild.get());
+            nodesToProcess.push_back(rChild.get());
+
+            nodePtr->lChild = std::move(lChild);
+            nodePtr->rChild = std::move(rChild);
 
             layerSize += 1;
         }
@@ -471,47 +415,204 @@ void Scene::buildBVH(const Mesh& mesh) {
     }
 
     // Testing
-    std::deque<CpuBvhNode> nodesToPrint = std::deque<CpuBvhNode>();
-    nodesToPrint.push_back(root);
+    printBVH(root);
+    // END TESTING
+
+    // Put in format better for GPU.
+    formatBVH(root, mesh);
+
+    //More Testing - Print GPU formatted data.
+    bool abridged = false;
+    printf("\n\n\n\n");
+    printf("    [ ");
+    for (int i = 0; i < mesh.numBvhNodes; i++) {
+        if (abridged && i + 2 == 15 && n > 16) {
+            i = n - 2;
+            printf("... ");
+        }
+
+        printf("Node: Left: %hu, Right: %hu, Offset: %i, Length: %i, Bounds %f - %f, %f - %f, %f - %f\n", 
+            mesh.bvhNodes[i].leftChild,
+            mesh.bvhNodes[i].rightChild,
+            mesh.bvhNodes[i].trisOffset,
+            mesh.bvhNodes[i].trisLength,
+            mesh.bvhNodes[i].minBounds.x,
+            mesh.bvhNodes[i].maxBounds.x,
+            mesh.bvhNodes[i].minBounds.y,
+            mesh.bvhNodes[i].maxBounds.y,
+            mesh.bvhNodes[i].minBounds.z,
+            mesh.bvhNodes[i].maxBounds.z);
+    }
+    
+    printf("\n");
+    for (int i = 0; i < mesh.indCount; i++) {
+        if (abridged && i + 2 == 15 && n > 16) {
+            i = n - 2;
+            printf("... ");
+        }
+
+        printf("%hu ", mesh.indBVH[i]);
+    }
+    printf("]\n");
+
+
+}
+
+
+std::pair <glm::vec3, glm::vec3> Scene::findBBoxOfTris(std::vector<Triangle> tris) {
+    glm::vec3 bbMaxBounds = glm::vec3(-INFINITY, -INFINITY, -INFINITY);
+    glm::vec3 bbMinBounds = glm::vec3(INFINITY, INFINITY, INFINITY);
+
+    for (int j = 0; j < tris.size(); j++) {
+        Triangle currTri = tris[j];
+        glm::vec3* pts = currTri.points;
+        bbMaxBounds = glm::max(bbMaxBounds, pts[0]);
+        bbMaxBounds = glm::max(bbMaxBounds, pts[1]);
+        bbMaxBounds = glm::max(bbMaxBounds, pts[2]);
+        bbMinBounds = glm::min(bbMinBounds, pts[0]);
+        bbMinBounds = glm::min(bbMinBounds, pts[1]);
+        bbMinBounds = glm::min(bbMinBounds, pts[2]);
+    }
+    return std::make_pair(bbMaxBounds, bbMinBounds);
+}
+
+std::pair <int, float> Scene::findSplitPoint(CpuBvhNode* node) {
+    // Find axis to split
+    int axisToSplit = 0;
+    if (node->maxBounds.y - node->minBounds.y > node->maxBounds.x - node->minBounds.x) {
+        axisToSplit = 1;
+    }
+    if (node->maxBounds.z - node->minBounds.z > node->maxBounds.y - node->minBounds.y &&
+        node->maxBounds.z - node->minBounds.z > node->maxBounds.x - node->minBounds.x) {
+        axisToSplit = 2;
+    }
+    // Split bounding boxes - just middle currently
+    float splitPos = (node->maxBounds[axisToSplit] + node->minBounds[axisToSplit]) / 2;
+
+    return std::make_pair(axisToSplit, splitPos);
+}
+
+void Scene::printBounds(CpuBvhNode* currNode, std::string id) {
+    printf(id.c_str());
+    printf(" with bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n",
+        currNode->minBounds[0], currNode->maxBounds[0], currNode->minBounds[1], currNode->maxBounds[1],
+        currNode->minBounds[2], currNode->maxBounds[2]);
+}
+
+void Scene::printBVH(const uPtr<CpuBvhNode>& root) {
+    std::deque<CpuBvhNode*> nodesToPrint = std::deque<CpuBvhNode*>();
+    nodesToPrint.push_back(root.get());
 
     while (!nodesToPrint.empty()) {
-        CpuBvhNode currNode = nodesToPrint[0];
+        CpuBvhNode* currNode = nodesToPrint[0];
         nodesToPrint.pop_front();
-        if (currNode.lChild != nullptr) {
-            nodesToPrint.push_back(*currNode.lChild);
+        printf("New Node:\n");
+        printBounds(currNode, "Node");
+        if (currNode->lChild != nullptr) {
+            printBounds(currNode->lChild.get(), "Has left child");
+            nodesToPrint.push_back(currNode->lChild.get());
         }
-        if (currNode.rChild != nullptr) {
-            nodesToPrint.push_back(*currNode.rChild);
+        if (currNode->rChild != nullptr) {
+            printBounds(currNode->rChild.get(), "Has right child");
+            nodesToPrint.push_back(currNode->rChild.get());
         }
-        if (currNode.lChild == nullptr && currNode.rChild == nullptr) {
-            printf("New Node:\n");
-            printf("Bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n", currNode.minBounds[0],
-                currNode.maxBounds[0], currNode.minBounds[1], currNode.maxBounds[1],
-                currNode.minBounds[2], currNode.maxBounds[2]);
-            if (currNode.lChild != nullptr) {
-                printf("Has left child with bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n",
-                    currNode.lChild->minBounds[0], currNode.lChild->maxBounds[0], currNode.lChild->minBounds[1], currNode.lChild->maxBounds[1],
-                    currNode.lChild->minBounds[2], currNode.lChild->maxBounds[2]);
-                nodesToPrint.push_back(*currNode.lChild);
-            }
-            if (currNode.rChild != nullptr) {
-                printf("Has right child with bounds: %.3f to %.3f, %.3f to %.3f, %.3f to %.3f\n",
-                    currNode.rChild->minBounds[0], currNode.rChild->maxBounds[0], currNode.rChild->minBounds[1], currNode.rChild->maxBounds[1],
-                    currNode.rChild->minBounds[2], currNode.rChild->maxBounds[2]);
-                nodesToPrint.push_back(*currNode.rChild);
-            }
 
-            printf("Tris: ");
-            for (Triangle t : currNode.tri) {
-                printf("[(%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f)], ",
-                    t.points[0][0], t.points[0][1], t.points[0][2],
-                    t.points[1][0], t.points[1][1], t.points[1][2],
-                    t.points[2][0], t.points[2][1], t.points[2][2]);
-            }
-            printf("\n");
+        printf("Tris: ");
+        for (Triangle t : currNode->tri) {
+            printf("[(%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f), (%.3f, %.3f, %.3f)], ",
+                t.points[0][0], t.points[0][1], t.points[0][2],
+                t.points[1][0], t.points[1][1], t.points[1][2],
+                t.points[2][0], t.points[2][1], t.points[2][2]);
+        }
+        printf("\n");
+    }
+}
+
+void Scene::formatBVH(const uPtr<CpuBvhNode>& root, Mesh& mesh) {
+    mesh.indBVH = new unsigned short[mesh.indCount];
+
+    // Count BVH tree node count;
+    int count = 0;
+    std::vector<CpuBvhNode*> nodesToCount = std::vector<CpuBvhNode*>();
+    nodesToCount.push_back(root.get());
+
+    while (!nodesToCount.empty()) {
+        CpuBvhNode* currNode = nodesToCount.back();
+        nodesToCount.pop_back();
+        count += 1;
+        if (currNode->lChild != nullptr) {
+            nodesToCount.push_back(currNode->lChild.get());
+        }
+        if (currNode->rChild != nullptr) {
+            nodesToCount.push_back(currNode->rChild.get());
         }
     }
-    // END TESTING
-    // TODO: NEED TO FREE CPUBVHNODE TREE
+
+    mesh.numBvhNodes = count;
+    mesh.bvhNodes = new BvhNode[count];
+    std::vector<int> parents;
+    int currIndex = 0; //into mesh.bvhNodes;
+    int currTrisOffset = 0;
+
+    // DFS traversal, so stack.
+    std::vector<CpuBvhNode*> nodesToProcess = std::vector<CpuBvhNode*>();
+    nodesToProcess.push_back(root.get());
+
+    while (!nodesToProcess.empty()) {
+        assert(currIndex < count);
+        CpuBvhNode* currNode = nodesToProcess.back();
+        nodesToProcess.pop_back();
+        if (!parents.empty()) {
+            int parentIdx = parents.back();
+            parents.pop_back();
+
+            if (mesh.bvhNodes[parentIdx].leftChild == 0) {
+                mesh.bvhNodes[parentIdx].leftChild = currIndex;
+            }
+            else {
+                // If this fails, more than two nodes have the same parent
+                assert(mesh.bvhNodes[parentIdx].rightChild == 0);
+                mesh.bvhNodes[parentIdx].rightChild = currIndex;
+            }
+        }
+
+        BvhNode& currOutNode = mesh.bvhNodes[currIndex];
+        currOutNode.maxBounds = currNode->maxBounds;
+        currOutNode.minBounds = currNode->minBounds;
+        currOutNode.leftChild = 0;
+        currOutNode.rightChild = 0;
+
+        if (currNode->lChild == nullptr && currNode->rChild == nullptr) {
+            currOutNode.trisOffset = currTrisOffset;
+            currOutNode.trisLength = 3 * currNode->tri.size();
+           
+
+            for (int i = 0; i < currNode->tri.size(); ++i) {
+                Triangle currTri = currNode->tri[i];
+
+                mesh.indBVH[currTrisOffset] = currTri.ind[0];
+                mesh.indBVH[currTrisOffset + 1] = currTri.ind[1];
+                mesh.indBVH[currTrisOffset + 2] = currTri.ind[2];
+
+                currTrisOffset += 3;
+            }
+        }
+        else {
+            currOutNode.trisOffset = -1;
+            currOutNode.trisLength = -1;
+
+            // Either both children are null or non-null
+            assert(currNode->lChild != nullptr && currNode->rChild != nullptr);
+
+            nodesToProcess.push_back(currNode->lChild.get());
+            parents.push_back(currIndex);
+            nodesToProcess.push_back(currNode->rChild.get());
+            parents.push_back(currIndex);
+        }
+
+        currIndex += 1;
+    }
+
+
 
 }
