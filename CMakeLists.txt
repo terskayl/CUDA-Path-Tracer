@@ -121,7 +121,8 @@ set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES CUDA_ARCHITECTURES native
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Debug,RelWithDebInfo>,$<COMPILE_LANGUAGE:CUDA>>:-G;-src-in-ptx>")
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE "$<$<AND:$<CONFIG:Release>,$<COMPILE_LANGUAGE:CUDA>>:-lineinfo;-src-in-ptx>")
 
-target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "tinygltf")
+target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE "tinygltf",
+cis565_path_tracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stream_compaction)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 

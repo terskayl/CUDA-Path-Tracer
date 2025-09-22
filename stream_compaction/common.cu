@@ -22,10 +22,10 @@ namespace StreamCompaction {
          * Maps an array to an array of 0s and 1s for stream compaction. Elements
          * which map to 0 will be removed, and elements which map to 1 will be kept.
          */
-        __global__ void kernMapToBoolean(int n, int *bools, const int *idata) {
+        __global__ void kernMapToBoolean(int n, int *bools, const PathSegment *idata) {
             unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx >= n) return;
-            if (idata[idx] == 0) {
+            if (idata[idx].remainingBounces <= 0) {
                 bools[idx] = 0;
             } else {
                 bools[idx] = 1;
