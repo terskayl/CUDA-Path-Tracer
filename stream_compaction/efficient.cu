@@ -252,7 +252,7 @@ namespace StreamCompaction {
             const PathSegment* idata, const int* falseIndices, int total) {
             unsigned idx = blockIdx.x * blockDim.x + threadIdx.x;
             if (idx >= n) return;
-            if (idata[idx].remainingBounces == 0) {
+            if (idata[idx].remainingBounces > 0) {
                 odata[falseIndices[idx]].pixelIndex = idata[idx].pixelIndex;
                 odata[falseIndices[idx]].ray.direction = idata[idx].ray.direction;
                 odata[falseIndices[idx]].ray.origin = idata[idx].ray.origin;
@@ -367,7 +367,25 @@ namespace StreamCompaction {
             PathSegment* temp = d_ping;
             d_ping = d_pong;
             d_pong = temp;
-            
+
+            //PathSegment* boolsHost = new PathSegment[n];
+            //cudaMemcpy(boolsHost, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToHost);
+            //printf("RESULT FROM SCAN: \n");
+            //for (int i = 0; i < n; ++i) {
+            //    printf("%i , ", boolsHost[i].remainingBounces);
+            //}
+            //printf("\n");
+            //printf("Total: %i \n", total);
+
+////int* boolsHost = new int[n];
+//cudaMemcpy(boolsHost, dev_bools, n * sizeof(int), cudaMemcpyDeviceToHost);
+//printf("dev Bools: \n");
+//for (int i = 0; i < n; ++i) {
+//    printf("%i , ", boolsHost[i]);
+//}
+//printf("\n");
+//printf("Total: %i \n", total);
+//delete[] boolsHost;
 
             cudaMemcpy(dev_odata, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
             checkCUDAError("cudaMemcpy out to odata");

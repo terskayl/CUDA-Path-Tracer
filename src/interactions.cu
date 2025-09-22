@@ -57,9 +57,8 @@ __host__ __device__ void scatterRay(
 
     float epsilon = 1e-5;
 
-    pathSegment.throughput *= m.color;
+    pathSegment.throughput *= m.baseColor;
 
     pathSegment.ray.origin = intersect + epsilon * normal;
     pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
-    pathSegment.remainingBounces--;
 }

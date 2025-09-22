@@ -93,16 +93,44 @@ struct Geom
 
 struct Material
 {
-    glm::vec3 color;
-    struct
-    {
-        float exponent;
-        glm::vec3 color;
-    } specular;
-    float hasReflective;
-    float hasRefractive;
-    float indexOfRefraction;
-    float emittance;
+    glm::vec3 baseColor;
+    int baseColorTexture = -1;
+    float metallic = 0.f;
+    float roughness = 1.f;
+    //typically roughness in G, metallic in B
+    int metallicRoughnessTexture = -1;
+
+    float specular = 0.f; // Low-priority
+    glm::vec3 specularTint = glm::vec3(1); // Low-priority
+    float ior = 1.f;
+
+    float sheen = 0.f; // Low-priority
+    glm::vec3 sheenTint = glm::vec3(1); // Low-priority
+    float sheenRoughness = 1.f; // Low-priority
+
+    float transmission = 0.f;
+    float clearcoat = 0.f; // Low-priority
+    float clearcoatRoughness= 1.f; // Low-priority
+
+    glm::vec3 emissive = glm::vec3(0.f);
+    int emissiveTexture = -1;
+    bool unlit = false;
+
+    int normalTexture = -1;
+    int occlusionTexture = -1; // Low priority, usually R channel of rough-metal
+
+    bool doubleSided = true; // Low-priority
+    int type = -1;
+    /* 
+    TODO: IMPLEMENT FOR SORTING AT SOME POINT
+    -1 : no material
+    0  : emissive
+    1  : pure diffuse
+    2  : microfacet
+    3  : pure specular
+    4  : metallic
+    5  : trasmissive
+    */
 };
 
 struct Camera

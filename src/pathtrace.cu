@@ -24,6 +24,11 @@
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
+
+#define STREAMCOMPACTION 1
+#define MATERIALSORTING 1
+
+
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
 #if ERRORCHECK
@@ -87,7 +92,7 @@ static PathSegment* dev_paths = NULL;
 static ShadeableIntersection* dev_intersections = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
-static int* dev_bools = NULL;
+static int* dev_isValidIntersection = NULL;
 static PathSegment* dev_pathsPong = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
@@ -117,8 +122,8 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
-    cudaMalloc(&dev_bools, pixelcount * sizeof(int));
-    cudaMemset(dev_bools, 0, pixelcount * sizeof(int));
+    cudaMalloc(&dev_isValidIntersection, pixelcount * sizeof(int));
+    cudaMemset(dev_isValidIntersection, 0, pixelcount * sizeof(int));
 
     cudaMalloc(&dev_pathsPong, pixelcount * sizeof(PathSegment));
 
@@ -133,7 +138,7 @@ void pathtraceFree()
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
     // TODO: clean up any extra device memory you created
-    cudaFree(dev_bools);
+    cudaFree(dev_isValidIntersection);
     cudaFree(dev_pathsPong);
     checkCUDAError("pathtraceFree");
 }
@@ -187,7 +192,7 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     ShadeableIntersection* intersections,
-    int* bools)
+    int* isValidIntersection)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -235,7 +240,7 @@ __global__ void computeIntersections(
         if (hit_geom_index == -1)
         {
             intersections[path_index].t = -1.0f;
-            bools[path_index] = 0;
+            isValidIntersection[path_index] = 0;
         }
         else
         {
@@ -243,7 +248,7 @@ __global__ void computeIntersections(
             intersections[path_index].t = t_min;
             intersections[path_index].materialId = geoms[hit_geom_index].materialid;
             intersections[path_index].surfaceNormal = normal;
-            bools[path_index] = 1;
+            isValidIntersection[path_index] = 1;
         }
     }
 }
@@ -267,6 +272,8 @@ __global__ void shadeFakeMaterial(
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
     {
+        pathSegments[idx].remainingBounces--;
+
         ShadeableIntersection intersection = shadeableIntersections[idx];
         if (intersection.t > 0.0f) // if the intersection exists...
         {
@@ -277,11 +284,11 @@ __global__ void shadeFakeMaterial(
             thrust::uniform_real_distribution<float> u01(0, 1);
 
             Material material = materials[intersection.materialId];
-            glm::vec3 materialColor = material.color;
+            glm::vec3 materialColor = material.baseColor;
 
             // If the material indicates that the object was a light, "light" the ray
-            if (material.emittance > 0.0f) {
-                pathSegments[idx].radiance = (materialColor * material.emittance);
+            if (glm::length(material.emissive) > 0.0f) {
+                pathSegments[idx].radiance = material.emissive;
                 pathSegments[idx].remainingBounces = 0;
             }
             // Otherwise, do some pseudo-lighting computation. This is actually more
@@ -300,7 +307,7 @@ __global__ void shadeFakeMaterial(
         }
         else {
             pathSegments[idx].throughput = glm::vec3(0.0f);
-            pathSegments[idx].remainingBounces = 123132140;
+            pathSegments[idx].remainingBounces = 0;
 
         }
     }
@@ -395,12 +402,12 @@ void pathtrace(uchar4* pbo, int frame, int iter)
     // Shoot ray into scene, bounce between objects, push shading chunks
 
     bool iterationComplete = false;
+    int num_paths = num_paths_total;
     while (!iterationComplete)
     {
-        int num_paths = num_paths_total;
         // clean shading chunks
         cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-        cudaMemset(dev_bools, 0, pixelcount * sizeof(int));
+        cudaMemset(dev_isValidIntersection, 0, pixelcount * sizeof(int));
 
 
         // tracing
@@ -412,14 +419,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_geoms,
             hst_scene->geoms.size(),
             dev_intersections,
-            dev_bools
+            dev_isValidIntersection
         );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
         depth++;
         
         //int* boolsHost = new int[num_paths];
-        //cudaMemcpy(boolsHost, dev_bools, num_paths * sizeof(int), cudaMemcpyDeviceToHost);
+        //cudaMemcpy(boolsHost, dev_isValidIntersection, num_paths * sizeof(int), cudaMemcpyDeviceToHost);
         //printf("Before: \n");
         //for (int i = 0; i < num_paths; ++i) {
         //    printf("%i , ", boolsHost[i]);
@@ -450,28 +457,20 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         //}
         //std::cout << std::endl;
 
-
-        num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_pathsPong, dev_paths, dev_bools, dev_intersections);
+#if STREAMCOMPACTION
+        num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_pathsPong, dev_paths, dev_isValidIntersection, dev_intersections);
         numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
         checkCUDAError("partition on intersect");
         // switch ping pong
         PathSegment* temp = dev_paths;
         dev_paths = dev_pathsPong;
         dev_pathsPong = temp;
+#endif
 
 
         //ShadeableIntersection* intersections = new ShadeableIntersection[num_paths];
         //cudaMemcpy(intersections, dev_intersections, num_paths * sizeof(ShadeableIntersection), cudaMemcpyDeviceToHost);
 
-        //PathSegment* paths = new PathSegment[num_paths];
-        //cudaMemcpy(paths, dev_paths, num_paths * sizeof(PathSegment), cudaMemcpyDeviceToHost);
-        //printf("After: \n");
-        //for (int i = 0; i < num_paths; ++i) {
-        //    printf("(%f , %i), ", intersections[i].t, paths[i].pixelIndex);
-        //}
-        //printf("\n");
-        //delete[] intersections;
-        //delete[] paths;
 
         // TODO:
         // --- Shading Stage ---
@@ -481,7 +480,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // materials you have in the scenefile.
         // TODO: compare between directly shading the path segments and shading
         // path segments that have been reshuffled to be contiguous in memory.
-
+#if MATERIALSORTING
         thrust::device_ptr<ShadeableIntersection> dev_thrust_intersections(dev_intersections);
         thrust::device_ptr<PathSegment> dev_thrust_paths(dev_paths);
 
@@ -498,6 +497,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         thrust::sort_by_key(d_keys.begin(), d_keys.end(), dev_thrust_paths);//zip_begin); ZIP IS SLOWER I THINK, TODO - check
         thrust::sort_by_key(d_keys2.begin(), d_keys2.end(), dev_thrust_intersections);
 
+#endif
         shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
             iter,
             num_paths,
@@ -506,16 +506,28 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_materials
         );
 
+#if STREAMCOMPACTION
         num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_pathsPong, dev_paths);
         numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        //checkCUDAError("partition on bounces");
-        //// switch ping pong
-        //temp = dev_paths;
-        //dev_paths = dev_pathsPong;
-        //dev_pathsPong = temp;
+        checkCUDAError("partition on bounces");
+        // switch ping pong
+        temp = dev_paths;
+        dev_paths = dev_pathsPong;
+        dev_pathsPong = temp;
+#endif
 
-        //if (depth >= traceDepth)iterationComplete = true;
-        if (num_paths <= 0) iterationComplete = true; // TODO: should be based off stream compaction results.
+
+        //PathSegment* paths = new PathSegment[num_paths];
+        //cudaMemcpy(paths, dev_paths, num_paths * sizeof(PathSegment), cudaMemcpyDeviceToHost);
+        //printf("After: \n");
+        //for (int i = 0; i < num_paths; ++i) {
+        //    printf("%i, ", paths[i].remainingBounces);
+        //}
+        //printf("\n");
+        //delete[] paths;
+
+        if (depth >= traceDepth)iterationComplete = true;
+        //if (num_paths <= 0) iterationComplete = true; // TODO: should be based off stream compaction results.
 
 
 

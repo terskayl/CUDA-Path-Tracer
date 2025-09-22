@@ -64,18 +64,19 @@ void Scene::loadFromJSON(const std::string& jsonName)
         if (p["TYPE"] == "Diffuse")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.baseColor = glm::vec3(col[0], col[1], col[2]);
         }
         else if (p["TYPE"] == "Emitting")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
-            newMaterial.emittance = p["EMITTANCE"];
+            newMaterial.emissive = glm::vec3(col[0], col[1], col[2]);
+            float emit = p["EMITTANCE"];
+            newMaterial.emissive = glm::vec3(emit);
         }
         else if (p["TYPE"] == "Specular")
         {
             const auto& col = p["RGB"];
-            newMaterial.color = glm::vec3(col[0], col[1], col[2]);
+            newMaterial.baseColor = glm::vec3(col[0], col[1], col[2]);
         }
         MatNameToID[name] = materials.size();
         materials.emplace_back(newMaterial);
@@ -141,6 +142,10 @@ void Scene::loadFromJSON(const std::string& jsonName)
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 }
 
+static inline glm::vec3 doubleArrayToVec3(std::vector<double> arr) {
+    return glm::vec3(arr[0], arr[1], arr[2]);
+}
+
 bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 {
     printf("GLTF detected!\n");
@@ -172,8 +177,51 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         return false;
     }
 
-    // TODO: MATERIALS
- 
+    // Materials
+    for (tinygltf::Material& mat : model.materials) {
+        Material newMat;
+        newMat.baseColor = doubleArrayToVec3(mat.pbrMetallicRoughness.baseColorFactor);
+        newMat.baseColorTexture = mat.pbrMetallicRoughness.baseColorTexture.index; // TODO: WE DO NOT SUPPORT UDIMS? SO WE WILL NOT RECORD "TEXCOORD"
+        newMat.metallic = mat.pbrMetallicRoughness.metallicFactor;
+        newMat.roughness = mat.pbrMetallicRoughness.roughnessFactor;
+        newMat.metallicRoughnessTexture = mat.pbrMetallicRoughness.metallicRoughnessTexture.index;
+        
+        if (mat.extensions.count("KHR_materials_specular") != 0) {
+            auto specular = mat.extensions.find("KHR_materials_specular")->second;
+            newMat.specular = specular.Get("specularFactor").GetNumberAsDouble();
+            //newMat.specularTint = specular.Get("specularColorFactor") // IDK HOW TO TAKE ARRAY
+        }
+        if (mat.extensions.count("KHR_materials_ior") != 0) {
+            newMat.ior = mat.extensions.find("KHR_materials_ior")->second.Get("ior").GetNumberAsDouble();
+        }
+
+        if (mat.extensions.count("KHR_materials_clearcoat")) {
+            newMat.clearcoat = mat.extensions.find("KHR_materials_clearcoat")->second.Get("clearcoatFactor").GetNumberAsDouble();
+            //newMat.clearcoatRoughness = mat.extensions.find("KHR_materials_clearcoat")->second.Get("NotSureIfExists").GetNumberAsDouble();
+        }
+
+        if (mat.extensions.count("KHR_materials_sheen")) {
+            auto sheen = mat.extensions.find("KHR_materials_sheen")->second;
+            newMat.sheen = 1;
+            //newMat.sheenTint = sheen.Get("sheenColorFactor"); // Don't know how to use
+            newMat.sheenRoughness = sheen.Get("sheenRoughnessFactor").GetNumberAsDouble();
+        }
+
+        if (mat.extensions.count("KHR_materials_transmission")) {
+            newMat.transmission = mat.extensions.find("KHR_materials_transmission")->second.Get("transmissionFactor").GetNumberAsDouble();
+        }
+        newMat.emissive = doubleArrayToVec3(mat.emissiveFactor);
+        newMat.emissiveTexture = mat.emissiveTexture.index;
+
+        newMat.normalTexture = mat.normalTexture.index;
+        newMat.occlusionTexture = mat.occlusionTexture.index;
+
+        newMat.doubleSided = mat.doubleSided;
+        newMat.unlit = false;
+
+        materials.push_back(newMat);
+    }
+
     // Loop through all nodes, then through meshes
     for (tinygltf::Node& node : model.nodes) {
         Geom newGeom;
