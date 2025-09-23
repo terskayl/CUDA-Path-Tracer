@@ -58,7 +58,11 @@ __host__ __device__ void scatterRay(
     float epsilon = 1e-5;
 
     pathSegment.throughput *= m.baseColor;
-
+    assert(!isnan(normal.x));
+    assert(!isnan(normal.y));
+    assert(!isnan(normal.z));
     pathSegment.ray.origin = intersect + epsilon * normal;
     pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
+    assert(fabs(glm::length(pathSegment.ray.direction) - 1.f) < 0.5f);
+
 }

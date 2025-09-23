@@ -361,37 +361,141 @@ void triangleTest() {
         intersectionPoint[0], intersectionPoint[1], intersectionPoint[2],
         normal[0], normal[1], normal[2], notBackface, t);
 
-    //rng
 
-    //run 1 million times.
-    std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
+    r.direction = glm::vec3(0, 0, 1);
+    t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t == -1);
+
+    r.direction = glm::vec3(0, 1, 0);
+    t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t == -1);
+
+    r.direction = glm::vec3(1, 0, 0);
+    t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t == -1);
+
+    r.direction = glm::normalize(glm::vec3(1, 0, 1));
+    t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t == -1);
+
+    r.origin = glm::vec3(0, 0, 0.5);
+    r.direction = glm::normalize(glm::vec3(1, 0, -1));
+    t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
+        intersectionPoint, normal, notBackface);
+    assert(t != -1);
 
 
-    for (int i = 0; i < 1000000; ++i) {
-        r.direction = glm::normalize(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
-        if (glm::length(r.direction) - 1 > 0.01 || !r.direction[0]) {
-            r.direction = glm::vec3(1, 0, 0);
+    // Define a triangle lying flat in the XY plane
+    glm::vec3 v0(-1, -1, 0);
+    glm::vec3 v1(1, -1, 0);
+    glm::vec3 v2(0, 1, 0);
+
+    r.origin = glm::vec3(0, 0, 1.0f); // Start above the triangle
+
+    int hits = 0;
+    int misses = 0;
+
+    // Sweep directions in a hemisphere
+    std::cout << std::endl;
+    for (int thetaDeg = -80; thetaDeg <= 80; thetaDeg += 5) {   // pitch
+        for (int phiDeg = 0; phiDeg < 360; phiDeg += 5) {       // yaw
+            float theta = glm::radians((float)thetaDeg);
+            float phi = glm::radians((float)phiDeg);
+
+            // Spherical to Cartesian (unit vector)
+            r.direction = glm::normalize(glm::vec3(
+                cos(theta) * cos(phi),
+                cos(theta) * sin(phi),
+                sin(theta)
+            ));
+
+            float t = triangleIntersectionTest(v0, v1, v2, r,
+                intersectionPoint, normal, notBackface);
+
+            if (t > 0) {
+                hits++;
+                // Sanity check: intersection should be close to z = 0
+                assert(fabs(intersectionPoint.z) < 1e-4);
+                std::cout << "hits ";
+            }
+            else {
+                misses++;
+                std::cout << "miss ";
+            }
         }
-        r.origin = glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
-        float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            r, intersectionPoint, normal, notBackface);
+        std::cout << std::endl;
     }
 
-    std::string endTimeString = currentTimeString();
+    std::cout << "Total rays tested: " << (hits + misses) << "\n";
+    std::cout << "Hits: " << hits << ", Misses: " << misses << "\n";
 
-    std::chrono::high_resolution_clock::time_point time_end_cpu = std::chrono::high_resolution_clock::now();
 
 
-    std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
-    float prev_elapsed_time_cpu_milliseconds =
-        static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
 
-    // TODO DO TIMING
-    printf("\n");
-    printf("Time Taken: %fms", prev_elapsed_time_cpu_milliseconds);
-    printf("\n");
+
+    std::cout << std::endl;
+    for (float thetaDeg = -2; thetaDeg <= 2; thetaDeg += 0.1) {   // pitch
+        for (float phiDeg = -2; phiDeg <= 2; phiDeg += 0.1) {       // yaw
+            float theta = glm::radians((float)thetaDeg);
+            float phi = glm::radians((float)phiDeg);
+
+            // Spherical to Cartesian (unit vector)
+            r.direction = glm::vec3(0.f, 0.f, -1.f);
+            r.origin = glm::vec3(thetaDeg, phiDeg, 1);
+
+            float t = triangleIntersectionTest(v0, v1, v2, r,
+                intersectionPoint, normal, notBackface);
+
+            if (t > 0) {
+                hits++;
+                // Sanity check: intersection should be close to z = 0
+                assert(fabs(intersectionPoint.z) < 1e-4);
+                std::cout << "O ";
+            }
+            else {
+                misses++;
+                std::cout << "X ";
+            }
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "Total rays tested: " << (hits + misses) << "\n";
+    std::cout << "Hits: " << hits << ", Misses: " << misses << "\n";
+
+
+    ////run 1 million times.
+    //std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
+
+
+    //for (int i = 0; i < 1000000; ++i) {
+    //    r.direction = glm::normalize(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
+    //    if (glm::length(r.direction) - 1 > 0.01 || !r.direction[0]) {
+    //        r.direction = glm::vec3(1, 0, 0);
+    //    }
+    //    r.origin = glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+    //    float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+    //        glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+    //        glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+    //        r, intersectionPoint, normal, notBackface);
+    //}
+
+    //std::string endTimeString = currentTimeString();
+
+    //std::chrono::high_resolution_clock::time_point time_end_cpu = std::chrono::high_resolution_clock::now();
+
+
+    //std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
+    //float prev_elapsed_time_cpu_milliseconds =
+    //    static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
+
+    //printf("\n");
+    //printf("Time Taken: %fms", prev_elapsed_time_cpu_milliseconds);
+    //printf("\n");
 
 }
 
@@ -513,7 +617,21 @@ void runCuda()
 
     if (iteration == 0)
     {
-        pathtraceFree();
+        pathtraceFree(scene);
+        bool abridged = true;
+        int n = scene->geoms[0].mesh.indCount;
+        // ind
+        printf("POST FREE DATA.\n");
+        for (int i = 0; i < scene->geoms[0].mesh.indCount; i++) {
+            if (abridged && i + 2 == 15 && n > 16) {
+                i = n - 2;
+                printf("... ");
+            }
+
+            printf("%hu ", scene->geoms[0].mesh.indBVH[i]);
+        }
+        printf("]\n");
+
         pathtraceInit(scene);
     }
 
@@ -533,7 +651,7 @@ void runCuda()
     else
     {
         saveImage();
-        pathtraceFree();
+        pathtraceFree(scene);
         cudaDeviceReset();
         exit(EXIT_SUCCESS);
     }

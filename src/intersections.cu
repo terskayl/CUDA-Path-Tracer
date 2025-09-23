@@ -123,21 +123,21 @@ __host__ __device__ float triangleIntersectionTest(
     bool& notBackface)
 {
 
-    assert(abs(glm::length(r.direction) - 1) < 0.01);
+    assert(abs(glm::length(r.direction)) - 1 < 0.01);
     glm::vec3 v12 = p2 - p1;
     glm::vec3 v13 = p3 - p1;
-    normal = glm::normalize(glm::cross(v12, v13));
+    glm::vec3 currNormal = glm::normalize(glm::cross(v12, v13));
 
     // Find Ray intersection with plane of triangle
-    float dist = glm::dot(p1 - r.origin, normal);
+    float dist = glm::dot(p1 - r.origin, currNormal);
     // how much closer the ray move per time t?
-    float step = glm::dot(r.direction, normal);
+    float step = glm::dot(r.direction, currNormal);
     if (abs(step) < 0.0001) {
         return -1; // Ray direction is parallel to the triangle
     }
     notBackface = true;
     if (step > 0) {
-        normal *= -1; // I presume we want normal facing towards ray anyways
+        currNormal *= -1; // I presume we want normal facing towards ray anyways
         notBackface = false;
     }
 
@@ -151,13 +151,16 @@ __host__ __device__ float triangleIntersectionTest(
 
     // Barycentric check to determine if inside triangle.
     // Let planeIntersectionPoint be denoted as s.
-    float areaS12 = abs(glm::length(glm::cross(v12, intersectionPoint - p1)));
-    float areaS23 = abs(glm::length(glm::cross(p3 - p2, intersectionPoint - p2)));
-    float areaS31 = abs(glm::length(glm::cross(intersectionPoint - p1, v13)));
+    float areaS12 = glm::length(glm::cross(p2 - p1, intersectionPoint - p1));
+    float areaS23 = glm::length(glm::cross(p3 - p2, intersectionPoint - p2));
+    float areaS31 = glm::length(glm::cross(p1 - p3, intersectionPoint - p3));
 
-    float area123 = abs(glm::length(glm::cross(v12, v13)));
+    float area123 = glm::length(glm::cross(p2 - p1, p3 - p1));
 
-    if (area123 - areaS12 - areaS23 - areaS31 < 0.0001) {
+    float diff = fabs((areaS12 + areaS23 + areaS31) - area123);
+    if (diff < 1e-5) {
+        normal = currNormal;
+        intersectionPoint = r.origin + r.direction * t;
         return t;
     }
     return -1;
@@ -166,22 +169,63 @@ __host__ __device__ float triangleIntersectionTest(
 
 // TODO
 __host__ __device__ float meshIntersectionTestNaive(
-    Geom mesh,
+    Geom geom,
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside)
 {
-    return -1;
+    const Mesh& mesh = geom.mesh;
+    float min_t = INFINITY;
+    glm::vec3 min_intersect, min_normal;
+    bool min_outside;
+
+    Ray q;
+    q.origin = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
+    q.direction = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    assert(abs(glm::length(q.direction) - 1) < 0.01);
+
+    for (int i = 0; i < mesh.indCount / 3.f; ++i) {
+        glm::vec3 tmp_intersect, tmp_normal;
+        bool tmp_outside;
+        float t = triangleIntersectionTest(
+            mesh.pos[mesh.ind[3 * i]],
+            mesh.pos[mesh.ind[3 * i + 1]],
+            mesh.pos[mesh.ind[3 * i + 2]],
+            q, tmp_intersect, tmp_normal, tmp_outside);
+
+        if (t > 0 && t < min_t) {
+            min_t = t;
+            min_intersect = tmp_intersect;
+            min_normal = tmp_normal;
+            min_outside = tmp_outside;
+        }
+    }
+
+    if (min_t == INFINITY) {
+        return -1;
+    }
+    intersectionPoint = multiplyMV(geom.transform, glm::vec4(getPointOnRay(q, min_t), 1.0f));
+    assert(!isnan(min_normal.x));
+    assert(!isnan(min_normal.y));
+    assert(!isnan(min_normal.z));
+    normal = glm::normalize(multiplyMV(geom.invTranspose, glm::vec4(min_normal, 0.0f)));
+    assert(!isnan(normal.x));
+    assert(!isnan(normal.y));
+    assert(!isnan(normal.z));
+    return glm::length(r.origin - intersectionPoint);
+
+    return min_t;
 }
 
 // TODO
 __host__ __device__ float meshIntersectionTestBVH(
-    Geom mesh,
+    Geom geom,
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
     bool& outside)
 {
+    const Mesh& mesh = geom.mesh;
     return -1;
 }

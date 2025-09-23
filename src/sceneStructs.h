@@ -51,16 +51,20 @@ struct Mesh
     // indices reordered, still form same tris
     unsigned short* indBVH = nullptr;
 
+    bool onGpu = false; 
+
     __host__ __device__ ~Mesh() {
 
 #ifndef __CUDA_ARCH__
-        delete[] pos;
-        delete[] nor;
-        delete[] uv;
-        delete[] ind;
+        if (!onGpu) { // TODO: MEMORY LEAK POTENTIAL?
+            //delete[] pos;
+            //delete[] nor;
+            //delete[] uv;
+            //delete[] ind;
 
-        delete[] bvhNodes;
-        delete[] indBVH;
+            //delete[] bvhNodes;
+            //delete[] indBVH;
+        }
 #endif
 
 #ifdef __CUDA_ARCH__ // Need to check these are like being used then ---
@@ -83,7 +87,7 @@ struct Geom
     int materialid;
     glm::vec3 translation;
     glm::vec3 rotation;
-    glm::vec3 scale;
+    glm::vec3 scale = glm::vec3(1.f);
     glm::mat4 transform;
     glm::mat4 inverseTransform;
     glm::mat4 invTranspose;

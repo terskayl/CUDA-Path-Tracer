@@ -15,7 +15,8 @@
 		{
 			"name":"Scene",
 			"nodes":[
-				0
+				0,
+				1
 			]
 		}
 	],
@@ -23,6 +24,33 @@
 		{
 			"mesh":0,
 			"name":"Cube"
+		},
+		{
+			"camera":0,
+			"name":"Camera",
+			"rotation":[
+				-0.0,
+				0.0,
+				0.0,
+				1.0
+			],
+			"translation":[
+				0.0,
+				3.0,
+				5.0
+			]
+		}
+	],
+	"cameras":[
+		{
+			"name":"Camera",
+			"perspective":{
+				"aspectRatio":1.7777777777777777,
+				"yfov":0.39959652046304894,
+				"zfar":100,
+				"znear":0.10000000149011612
+			},
+			"type":"perspective"
 		}
 	],
 	"materials":[
@@ -38,7 +66,7 @@
 					"clearcoatFactor":0.2836363613605499
 				},
 				"KHR_materials_transmission":{
-					"transmissionFactor":0.14181818068027496
+					"transmissionFactor":0.11272728443145752
 				},
 				"KHR_materials_specular":{
 					"specularFactor":0.9236363768577576,
@@ -71,6 +99,27 @@
 				"metallicFactor":0,
 				"roughnessFactor":0.34363633394241333
 			}
+		},
+		{
+			"doubleSided":true,
+			"emissiveFactor":[
+				0.2999999523162842,
+				0.19208315658073616,
+				0.73102186733353847
+			],
+			"extensions":{
+			},
+			"name":"Material",
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0.800000011920929,
+					0.800000011920929,
+					0.800000011920929,
+					1
+				],
+				"metallicFactor":0,
+				"roughnessFactor":0.34363633394241333
+			}
 		}
 	],
 	"meshes":[
@@ -84,7 +133,7 @@
 						"TEXCOORD_0":2
 					},
 					"indices":3,
-					"material":0
+					"material":1
 				}
 			]
 		}

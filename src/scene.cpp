@@ -142,6 +142,35 @@ void Scene::loadFromJSON(const std::string& jsonName)
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 }
 
+static void createDefaultCamera(RenderState& state) {
+    Camera& camera = state.camera;
+    camera.resolution.x = 800;
+    camera.resolution.y = 800;
+    float fovy = 45.f;
+    state.iterations = 5000;
+    state.traceDepth = 8;
+    state.imageName = "untitled";
+    const double pos[3] = {0.0, 5.0, 10.5};
+    const double lookat[3] = {0.0, 5.0, 0.0};
+    const double up[3] = {0.0, 1.0, 0.0};
+    camera.position = glm::vec3(pos[0], pos[1], pos[2]);
+    camera.lookAt = glm::vec3(lookat[0], lookat[1], lookat[2]);
+    camera.up = glm::vec3(up[0], up[1], up[2]);
+
+    //calculate fov based on resolution
+    float yscaled = tan(fovy * (PI / 180));
+    float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
+    float fovx = (atan(xscaled) * 180) / PI;
+    camera.fov = glm::vec2(fovx, fovy);
+
+    camera.view = glm::normalize(camera.lookAt - camera.position);
+
+    camera.right = glm::normalize(glm::cross(camera.view, camera.up));
+    camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
+        2 * yscaled / (float)camera.resolution.y);
+}
+
+
 static inline glm::vec3 doubleArrayToVec3(std::vector<double> arr) {
     return glm::vec3(arr[0], arr[1], arr[2]);
 }
@@ -221,7 +250,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
         materials.push_back(newMat);
     }
-
+    bool cameraSet = false;
     // Loop through all nodes, then through meshes
     for (tinygltf::Node& node : model.nodes) {
         Geom newGeom;
@@ -231,23 +260,31 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             newGeom.translation = glm::vec3(node.translation[0], node.translation[1], node.translation[2]);
         }
         if (node.rotation.size()) {
-            glm::quat rot = glm::quat(node.rotation[0], node.rotation[1], node.rotation[2], node.rotation[3]);
+                                    // Quat wants WXYZ but gltf is XYZW
+            glm::quat rot = glm::quat(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
             newGeom.rotation = glm::eulerAngles(rot);
+            float invPi = 1.f / 3.1415926f;
+            newGeom.rotation.x *= 180.f * invPi;
+            newGeom.rotation.y *= 180.f * invPi;
+            newGeom.rotation.z *= 180.f * invPi;
         }
         if (node.scale.size()) {
             newGeom.scale = glm::vec3(node.scale[0], node.scale[1], node.scale[2]);
         }
         if (node.matrix.size()) {
             std::vector<double> mat = node.matrix;
-            glm::mat4 otherMat = utilityCore::buildTransformationMatrix(
-                newGeom.translation, newGeom.rotation, newGeom.scale);
             newGeom.transform = glm::mat4( mat[0],  mat[1],  mat[2],  mat[3],
                                            mat[4],  mat[5],  mat[6],  mat[7],
                                            mat[8],  mat[9],  mat[10], mat[11],
                                            mat[12], mat[13], mat[14], mat[15] );
+            glm::mat4 otherMat = utilityCore::buildTransformationMatrix(
+                newGeom.translation, newGeom.rotation, newGeom.scale);
             // TODO check this works
             assert(otherMat == newGeom.transform);
         }
+
+        newGeom.transform = utilityCore::buildTransformationMatrix(
+            newGeom.translation, newGeom.rotation, newGeom.scale);
         newGeom.inverseTransform = glm::inverse(newGeom.transform);
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
         
@@ -257,8 +294,8 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             tinygltf::Mesh mesh = model.meshes[node.mesh];
 
             for (tinygltf::Primitive& prim: mesh.primitives) {
-                // TODO: EACH PRIMATIVE HAS A MATERIAL, DO MATMAP HERE
-                
+                newGeom.materialid = prim.material;
+
                 assert(prim.mode == 4); // GLTF encoding for TRIANGLES
 
                 if (prim.attributes.count("POSITION") > 0) {
@@ -370,9 +407,45 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         }
 
         if (node.camera != -1) {
-            // TODO CAMERA
+            cameraSet = true;
+            Camera& camera = state.camera;
+            tinygltf::Camera cam = model.cameras[node.camera];
+            camera.resolution.x = 800;
+            camera.resolution.y = 800 / cam.perspective.aspectRatio;
+            float fovy = cam.perspective.yfov;
+            state.iterations = 5000;
+            state.traceDepth = 8;
+            state.imageName = model.nodes[0].name; // Weird name
+            camera.position = newGeom.translation;
+            camera.view = glm::normalize(glm::vec3(newGeom.transform * glm::vec4(0.f, 0.f, -1.f, 0.f)));
+            camera.up = glm::normalize(glm::vec3(newGeom.transform * glm::vec4(0.f, 1.f, 0.f, 0.f)));
+
+            //calculate fov based on resolution
+            float yscaled = tan(fovy * (PI / 180));
+            float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
+            float fovx = (atan(xscaled) * 180) / PI;
+            camera.fov = glm::vec2(fovx, fovy);
+
+            float focalPlaneDist = 5.f; // Can we find a way to fix this?
+            camera.lookAt = camera.position + camera.view * focalPlaneDist;
+
+            glm::vec3 crossV = glm::cross(camera.view, camera.up);
+            camera.right = glm::normalize(glm::cross(camera.view, camera.up));
+            camera.pixelLength = glm::vec2(2 * xscaled / (float)camera.resolution.x,
+                2 * yscaled / (float)camera.resolution.y);
+
         }
     }
+
+    if (!cameraSet) {
+        createDefaultCamera(state);
+    }
+
+    //set up render camera stuff
+    int arraylen = state.camera.resolution.x * state.camera.resolution.y;
+    state.image.resize(arraylen);
+    std::fill(state.image.begin(), state.image.end(), glm::vec3());
+
 }
 
 void Scene::buildBVH(Mesh& mesh) {

@@ -27,6 +27,7 @@
 
 #define STREAMCOMPACTION 1
 #define MATERIALSORTING 1
+#define BVH 0;
 
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
@@ -112,6 +113,56 @@ void pathtraceInit(Scene* scene)
 
     cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
 
+    printf("INITING");
+
+    // Copy all mesh data onto the GPU
+    for (Geom& geom : scene->geoms) {
+        if (geom.type == MESH && !geom.mesh.onGpu) {
+            Mesh& mesh = geom.mesh;
+
+            glm::vec3 *posTmp, *norTmp;
+            glm::vec2* uvTmp;
+            unsigned short* indTmp, *indBvhTmp;
+            BvhNode* nodesTmp;
+
+            cudaMalloc((void**)&posTmp, mesh.posCount * sizeof(glm::vec3));
+            cudaMemcpy(posTmp, mesh.pos, mesh.posCount * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+            free(mesh.pos);
+            mesh.pos = posTmp;
+
+            cudaMalloc((void**)&norTmp, mesh.norCount * sizeof(glm::vec3));
+            cudaMemcpy(norTmp, mesh.nor, mesh.norCount * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+            free(mesh.nor);
+            mesh.nor = norTmp;
+
+            cudaMalloc((void**)&uvTmp, mesh.uvCount * sizeof(glm::vec2));
+            cudaMemcpy(uvTmp, mesh.uv, mesh.uvCount * sizeof(glm::vec2), cudaMemcpyHostToDevice);
+            free(mesh.uv);
+            mesh.uv = uvTmp;
+
+            cudaMalloc((void**)&indTmp, mesh.indCount * sizeof(unsigned short));
+            cudaMemcpy(indTmp, mesh.ind, mesh.indCount * sizeof(unsigned short), cudaMemcpyHostToDevice);
+            free(mesh.ind);
+            mesh.ind = indTmp;
+
+            if (mesh.numBvhNodes > 0) {
+                cudaMalloc((void**)&nodesTmp, mesh.numBvhNodes * sizeof(BvhNode));
+                cudaMemcpy(nodesTmp, mesh.bvhNodes, mesh.numBvhNodes * sizeof(BvhNode), cudaMemcpyHostToDevice);
+                free(mesh.bvhNodes);
+                mesh.bvhNodes = nodesTmp;
+
+                cudaMalloc((void**)&indBvhTmp, mesh.indCount * sizeof(unsigned short));
+                cudaMemcpy(indBvhTmp, mesh.indBVH, mesh.indCount * sizeof(unsigned short), cudaMemcpyHostToDevice);
+                free(mesh.indBVH);
+                mesh.indBVH = indBvhTmp;
+            }
+
+            geom.mesh.onGpu = true;
+            printf("LOADED ONTO THE GPU");
+            cudaDeviceSynchronize();
+        }
+    }
+
     cudaMalloc(&dev_geoms, scene->geoms.size() * sizeof(Geom));
     cudaMemcpy(dev_geoms, scene->geoms.data(), scene->geoms.size() * sizeof(Geom), cudaMemcpyHostToDevice);
 
@@ -130,10 +181,64 @@ void pathtraceInit(Scene* scene)
     checkCUDAError("pathtraceInit");
 }
 
-void pathtraceFree()
+void pathtraceFree(Scene* scene)
 {
     cudaFree(dev_image);  // no-op if dev_image is null
     cudaFree(dev_paths);
+    checkCUDAError("pathtraceFree1");
+
+    // Free individual mesh buffers
+    for (Geom& geom : scene->geoms) {
+        if (geom.type == MESH && geom.mesh.onGpu) {
+            Mesh& mesh = geom.mesh;
+
+            glm::vec3* posTmp = new glm::vec3[mesh.posCount];
+            glm::vec3* norTmp = new glm::vec3[mesh.norCount];
+            glm::vec2* uvTmp = new glm::vec2[mesh.uvCount];
+            unsigned short* indTmp = new unsigned short[mesh.indCount];
+            BvhNode* nodesTmp = new BvhNode[mesh.numBvhNodes];
+            unsigned short* indBvhTmp = new unsigned short[mesh.indCount];
+
+            cudaMemcpy(posTmp, mesh.pos, mesh.posCount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+            cudaFree(mesh.pos);
+            checkCUDAError("pathtraceFree2");
+            mesh.pos = posTmp;
+
+            cudaMemcpy(norTmp, mesh.nor, mesh.norCount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+            cudaFree(mesh.nor);
+            checkCUDAError("pathtraceFree2");
+            mesh.nor = norTmp;
+
+            cudaMemcpy(uvTmp, mesh.uv, mesh.uvCount * sizeof(glm::vec2), cudaMemcpyDeviceToHost);
+            cudaFree(mesh.uv);
+            checkCUDAError("pathtraceFree2");
+            mesh.uv = uvTmp;
+
+            cudaMemcpy(indTmp, mesh.ind, mesh.indCount * sizeof(unsigned short), cudaMemcpyDeviceToHost);
+            cudaFree(mesh.ind);
+            checkCUDAError("pathtraceFree2");
+            mesh.ind = indTmp;
+
+            if (mesh.numBvhNodes > 0) {
+                cudaMemcpy(nodesTmp, mesh.bvhNodes, mesh.numBvhNodes * sizeof(BvhNode), cudaMemcpyDeviceToHost);
+                cudaFree(mesh.bvhNodes);
+                checkCUDAError("pathtraceFree2");
+                mesh.bvhNodes = nodesTmp;
+
+                cudaMemcpy(indBvhTmp, mesh.indBVH, mesh.indCount * sizeof(unsigned short), cudaMemcpyDeviceToHost);
+                cudaFree(mesh.indBVH);
+                checkCUDAError("pathtraceFree2");
+                mesh.indBVH = indBvhTmp;
+            }
+
+            geom.mesh.onGpu = false;
+            printf("LOADED BACK ONTO CPU");
+            cudaDeviceSynchronize();
+
+        }
+    }
+    checkCUDAError("pathtraceFree2");
+
     cudaFree(dev_geoms);
     cudaFree(dev_materials);
     cudaFree(dev_intersections);
@@ -174,6 +279,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             + cam.right * cam.pixelLength.x * (u01(rng) - 0.5f)
             + cam.up * cam.pixelLength.y * (u01(rng) - 0.5f)
         );
+        assert(fabs(glm::length(segment.ray.direction)) - 1 < 0.01);
 
 
         segment.pixelIndex = index;
@@ -219,10 +325,27 @@ __global__ void computeIntersections(
             if (geom.type == CUBE)
             {
                 t = boxIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+                assert(!isnan(tmp_normal.x));
+                assert(!isnan(tmp_normal.y));
+                assert(!isnan(tmp_normal.z));
             }
             else if (geom.type == SPHERE)
             {
                 t = sphereIntersectionTest(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+                assert(!isnan(tmp_normal.x));
+                assert(!isnan(tmp_normal.y));
+                assert(!isnan(tmp_normal.z));
+            }
+            else if (geom.type == MESH) {
+#if BVH
+                t = meshIntersectionTestBVH(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+#else
+                t = meshIntersectionTestNaive(geom, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+                assert(!isnan(tmp_normal.x));
+                assert(!isnan(tmp_normal.y));
+                assert(!isnan(tmp_normal.z));
+
+#endif
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -247,6 +370,9 @@ __global__ void computeIntersections(
             // The ray hits something
             intersections[path_index].t = t_min;
             intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+            assert(!isnan(normal.x));
+            assert(!isnan(normal.y));
+            assert(!isnan(normal.z));
             intersections[path_index].surfaceNormal = normal;
             isValidIntersection[path_index] = 1;
         }
@@ -298,6 +424,9 @@ __global__ void shadeFakeMaterial(
                 //float lightTerm = glm::dot(intersection.surfaceNormal, glm::vec3(0.0f, 1.0f, 0.0f));
                 //pathSegments[idx].color *= (materialColor * lightTerm) * 0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
                 //pathSegments[idx].color *= u01(rng); // apply some noise because why not
+                assert(!isnan(intersection.surfaceNormal.x));
+                assert(!isnan(intersection.surfaceNormal.y));
+                assert(!isnan(intersection.surfaceNormal.z));
                 scatterRay(pathSegments[idx], pathSegments[idx].ray.direction * intersection.t + pathSegments[idx].ray.origin, intersection.surfaceNormal, material, rng);
             }
             // If there was no intersection, color the ray black.
@@ -409,7 +538,14 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
         cudaMemset(dev_isValidIntersection, 0, pixelcount * sizeof(int));
 
+        checkCUDAError("cudaMemset");
 
+        for (Geom geom : hst_scene->geoms) {
+            printf("TYPE IS: %i\n", static_cast<int>(geom.type));
+            if (geom.type == MESH) {
+                assert(geom.mesh.onGpu);
+            }
+        }
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
         computeIntersections<<<numblocksPathSegmentTracing, blockSize1d>>> (
@@ -465,6 +601,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         PathSegment* temp = dev_paths;
         dev_paths = dev_pathsPong;
         dev_pathsPong = temp;
+        if (num_paths == 0) break;
 #endif
 
 
@@ -526,7 +663,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         //printf("\n");
         //delete[] paths;
 
-        if (depth >= traceDepth)iterationComplete = true;
+        if (depth >= traceDepth || num_paths <= 0)iterationComplete = true;
         //if (num_paths <= 0) iterationComplete = true; // TODO: should be based off stream compaction results.
 
 
