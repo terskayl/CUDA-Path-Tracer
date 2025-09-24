@@ -183,10 +183,6 @@ __host__ __device__ float sphereIntersectionTest(
 
     intersectionPoint = multiplyMV(sphere.transform, glm::vec4(objspaceIntersection, 1.f));
     normal = glm::normalize(multiplyMV(sphere.invTranspose, glm::vec4(objspaceIntersection, 0.f)));
-    if (!outside)
-    {
-        normal = -normal;
-    }
 
     return glm::length(r.origin - intersectionPoint);
 }
@@ -205,6 +201,7 @@ __host__ __device__ float triangleIntersectionTest(
     assert(abs(glm::length(r.direction)) - 1 < 0.01);
     glm::vec3 v12 = p2 - p1;
     glm::vec3 v13 = p3 - p1;
+    // assume CCW winding order
     glm::vec3 currNormal = glm::normalize(glm::cross(v12, v13));
 
     // Find Ray intersection with plane of triangle
@@ -216,7 +213,6 @@ __host__ __device__ float triangleIntersectionTest(
     }
     notBackface = true;
     if (step > 0) {
-        currNormal *= -1; // I presume we want normal facing towards ray anyways
         notBackface = false;
     }
 
@@ -291,7 +287,7 @@ __host__ __device__ float meshIntersectionTestNaive(
     return min_t;
 }
 
-// TODO
+// Requires BVH TO OPERATE
 __host__ __device__ float meshIntersectionTestBVH(
     Geom geom,
     Ray r,

@@ -44,6 +44,76 @@ __host__ __device__ glm::vec3 calculateRandomDirectionInHemisphere(
         + sin(around) * over * perpendicularDirection2;
 }
 
+
+
+
+__host__ __device__ void sampleAndResolveDiffuse(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    thrust::default_random_engine& rng) {
+
+    pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
+    // bsdf evaluates to m.basecolor / pi. But the pdf is 1 / pi,
+    // so it cancels out to m.basecolor;
+    pathSegment.throughput *= m.baseColor;
+}
+
+__host__ __device__ void sampleAndResolveSpecularRefl(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    thrust::default_random_engine& rng) {
+
+    glm::vec3 dir = pathSegment.ray.direction;
+    pathSegment.ray.direction = dir - 2 * glm::dot(dir, normal) * normal;
+    pathSegment.throughput *= m.baseColor;
+}
+
+
+
+__host__ __device__ void sampleAndResolveSpecularTrans(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    thrust::default_random_engine& rng) {
+
+    glm::vec3 w_i = pathSegment.ray.direction;
+    bool isEntering = (dot(normal, w_i) < 0);
+
+    float etaA = 1;
+    float etaB = 1.4f;// m.ior;
+    float eta;
+
+
+    if (isEntering) {
+        eta = etaA / etaB;
+    }
+    else {
+        eta = etaB / etaA;
+        normal = -normal;
+    }
+
+    glm::vec3 reflectedDir = glm::refract(w_i, normal, eta);
+    // check for total internal rr
+    if (isnan(reflectedDir.x) ||
+        isnan(reflectedDir.y) ||
+        isnan(reflectedDir.z)) {
+        pathSegment.remainingBounces = 0;
+        return;
+    }
+
+    pathSegment.ray.direction = reflectedDir;
+    pathSegment.throughput *= m.baseColor;
+    return;
+}
+
+
+
+
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
     glm::vec3 intersect,
@@ -55,14 +125,26 @@ __host__ __device__ void scatterRay(
     // A basic implementation of pure-diffuse shading will just call the
     // calculateRandomDirectionInHemisphere defined above.
 
-    float epsilon = 1e-5;
+    // Glass fails at epsilon 1e-5.
+    float epsilon = 1e-4;
+    
+    if (m.roughness == 0) {
+        bool isEntering = dot(normal, pathSegment.ray.direction) < 0;
+        if (isEntering) {
+            pathSegment.ray.origin = intersect + epsilon * -normal;
+        }
+        else {
+            pathSegment.ray.origin = intersect + epsilon * normal;
+        }
+        sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
+    }
+    else{
+        pathSegment.ray.origin = intersect + epsilon * normal;
+        sampleAndResolveDiffuse(pathSegment, intersect, normal, m, rng);
+    }
 
-    pathSegment.throughput *= m.baseColor;
-    assert(!isnan(normal.x));
-    assert(!isnan(normal.y));
-    assert(!isnan(normal.z));
-    pathSegment.ray.origin = intersect + epsilon * normal;
-    pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
+
     assert(fabs(glm::length(pathSegment.ray.direction) - 1.f) < 0.5f);
 
 }
+

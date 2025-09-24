@@ -576,6 +576,89 @@ void bvhTraversalTest(Scene* scene) {
 
     meshIntersectionTestBVH(scene->geoms[0], r, intersectionPoint, normal, outside);
 }
+
+// Needs copy of sampleAndResolveSpecularTrans from interactions.cu to run
+void refractTest() {
+    Ray r;
+    r.origin = glm::vec3(0.8f, 4.0, -1.f); // Start inside the sphere
+
+    // Sweep directions in a hemisphere
+    std::cout << std::endl;
+    for (int thetaDeg = -80; thetaDeg <= 80; thetaDeg += 5) {   // pitch
+        for (int phiDeg = 180; phiDeg < 185; phiDeg += 5) {       // yaw
+            float theta = glm::radians((float)thetaDeg);
+            float phi = glm::radians((float)phiDeg);
+
+            // Spherical to Cartesian (unit vector)
+            r.direction = glm::normalize(glm::vec3(
+                cos(theta) * cos(phi),
+                cos(theta) * sin(phi),
+                sin(theta)
+            ));
+            glm::vec3 v1 = glm::refract(r.direction, glm::vec3(1, 0, 0), 1.f / 1.44f);
+
+            //printf("Input: (%.2f, %.2f, %.2f), Output: (%.2f, %.2f, %.2f)\n", r.direction.x, r.direction.y, r.direction.z, v1.x, v1.y, v1.z);
+
+            //printf("backwards\n");
+            //glm::vec3 u = glm::refract(v, glm::vec3(0, 0, 1), 1.44f);
+            //printf("Input: (%.2f, %.2f, %.2f), Output: (%.2f, %.2f, %.2f)\n", r.direction.x, r.direction.y, r.direction.z, u.x, u.y, u.z);
+
+            PathSegment path;
+            path.ray = r;
+            Ray& ray = path.ray;
+            path.remainingBounces = 1;
+
+            
+            glm::vec3 intersect, normal;
+            Material m;
+            bool outside;
+
+            glm::vec3 v = ray.direction;
+
+            assert(scene->geoms[6].type == SPHERE);
+            int t = sphereIntersectionTest(scene->geoms[6], ray, intersect, normal, outside);
+            if (t != -1) {
+
+                //sampleAndResolveSpecularTrans(path, intersect, normal, m);
+                //printf("Input: (%.2f, %.2f, %.2f), Output: (%.2f, %.2f, %.2f)\n", v.x, v.y, v.z, ray.direction.x, ray.direction.y, ray.direction.z);
+                // Entering sphere so -normal
+
+                ray.origin = intersect + normal * 1e-3f * (dot(ray.direction, normal) < 0 ? -1.f : 1.f);
+
+                glm::vec3 newIntersect;
+                t = sphereIntersectionTest(scene->geoms[6], ray, newIntersect, normal, outside);
+                
+                //printf("Normal:  (%.2f, %.2f, %.2f)\n", normal.x, normal.y, normal.z);
+                //printf("Prev iSect: (%.2f, %.2f, %.2f), New iSect: (%.2f, %.2f, %.2f)\n", intersect.x, intersect.y, intersect.z, newIntersect.x, newIntersect.y, newIntersect.z);
+
+                if (t != -1) {
+                    //sampleAndResolveSpecularTrans(path, intersect, normal, m);
+                    //printf("Input: (%.2f, %.2f, %.2f), Second Output: (%.2f, %.2f, %.2f)\n", v.x, v.y, v.z, ray.direction.x, ray.direction.y, ray.direction.z);
+                    
+                    glm::vec3 newNewIntersect;
+                    ray.origin = newIntersect + normal * 1e-3f * (dot(ray.direction, normal) < 0 ? -1.f : 1.f);
+
+                    t = sphereIntersectionTest(scene->geoms[6], ray, newNewIntersect, normal, outside);
+
+                    //printf("Normal:  (%.2f, %.2f, %.2f)\n", normal.x, normal.y, normal.z);
+                    printf("Prev iSect: (%.2f, %.2f, %.2f), Third iSect: (%.2f, %.2f, %.2f)\n", newIntersect.x, newIntersect.y, newIntersect.z, newNewIntersect.x, newNewIntersect.y, newNewIntersect.z);
+
+                
+                
+                }
+                else {
+                    printf("Input: (%.2f, %.2f, %.2f), Output: 0 \n", v.x, v.y, v.z);
+                }
+
+            }
+            else {
+                printf("Input: (%.2f, %.2f, %.2f), Output: 0 \n", v.x, v.y, v.z);
+            }
+
+
+        }
+    }
+}
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
@@ -639,7 +722,9 @@ int main(int argc, char** argv)
 
     // SCENE GEO TESTS
 #if TESTS
-    bvhTraversalTest(scene);
+    //bvhTraversalTest(scene);
+    //refractTest();
+
 #endif
 
 
@@ -704,22 +789,6 @@ void runCuda()
     if (iteration == 0)
     {
         pathtraceFree(scene);
-
-        // TESTING
-        bool abridged = true;
-        int n = scene->geoms[0].mesh.indCount;
-        // ind
-        printf("POST FREE DATA.\n");
-        for (int i = 0; i < scene->geoms[0].mesh.indCount; i++) {
-            if (abridged && i + 2 == 15 && n > 16) {
-                i = n - 2;
-                printf("... ");
-            }
-
-            printf("%hu ", scene->geoms[0].mesh.indBVH[i]);
-        }
-        printf("]\n");
-
         pathtraceInit(scene);
     }
 
