@@ -55,6 +55,13 @@ __host__ __device__ float boxIntersectionTest(
     glm::vec3& normal,
     bool& outside);
 
+// Simple bounding box intersection tests. Returns -1 if no hit and a positive
+// number if it does hit.
+__host__ __device__ float bboxIntersectionTest(
+    Ray r,
+    glm::vec3 minBounds,
+    glm::vec3 maxBonuds
+);
 // CHECKITOUT
 /**
  * Test intersection between a ray and a transformed sphere. Untransformed,

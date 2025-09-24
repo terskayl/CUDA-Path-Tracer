@@ -352,8 +352,8 @@ void triangleTest() {
     glm::vec3 intersectionPoint;
     glm::vec3 normal;
     bool notBackface;
-                                        // NOTE CCW
-    float t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0) , glm::vec3(-1, 1, 0), r,
+    // NOTE CCW
+    float t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
         intersectionPoint, normal, notBackface);
     assert(t != -1);
 
@@ -387,7 +387,13 @@ void triangleTest() {
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
         intersectionPoint, normal, notBackface);
     assert(t != -1);
+}
 
+void triangleAngleTest() {
+    Ray r;
+
+    glm::vec3 intersectionPoint, normal;
+    bool notBackface;
 
     // Define a triangle lying flat in the XY plane
     glm::vec3 v0(-1, -1, 0);
@@ -433,9 +439,20 @@ void triangleTest() {
     std::cout << "Total rays tested: " << (hits + misses) << "\n";
     std::cout << "Hits: " << hits << ", Misses: " << misses << "\n";
 
+}
 
+void trianglePositionTest() {
+    Ray r;
 
+    glm::vec3 intersectionPoint, normal;
+    bool notBackface;
+    // Define a triangle lying flat in the XY plane
+    glm::vec3 v0(-1, -1, 0);
+    glm::vec3 v1(1, -1, 0);
+    glm::vec3 v2(0, 1, 0);
 
+    int hits = 0;
+    int misses = 0;
 
     std::cout << std::endl;
     for (float thetaDeg = -2; thetaDeg <= 2; thetaDeg += 0.1) {   // pitch
@@ -466,39 +483,99 @@ void triangleTest() {
 
     std::cout << "Total rays tested: " << (hits + misses) << "\n";
     std::cout << "Hits: " << hits << ", Misses: " << misses << "\n";
+}
+
+void triangleSpeedTest() {
+
+    Ray r = Ray();
+    r.origin = glm::vec3(0, 0, 10);
+    r.direction = glm::vec3(0, 0, -1);
+
+    glm::vec3 intersectionPoint;
+    glm::vec3 normal;
+    bool notBackface;
+    //run 1 million times.
+    std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
 
 
-    ////run 1 million times.
-    //std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < 1000000; ++i) {
+        r.direction = glm::normalize(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
+        if (glm::length(r.direction) - 1 > 0.01 || !r.direction[0]) {
+            r.direction = glm::vec3(1, 0, 0);
+        }
+        r.origin = glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
+        float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
+            r, intersectionPoint, normal, notBackface);
+    }
+
+    std::string endTimeString = currentTimeString();
+
+    std::chrono::high_resolution_clock::time_point time_end_cpu = std::chrono::high_resolution_clock::now();
 
 
-    //for (int i = 0; i < 1000000; ++i) {
-    //    r.direction = glm::normalize(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)));
-    //    if (glm::length(r.direction) - 1 > 0.01 || !r.direction[0]) {
-    //        r.direction = glm::vec3(1, 0, 0);
-    //    }
-    //    r.origin = glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX));
-    //    float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-    //        glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-    //        glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-    //        r, intersectionPoint, normal, notBackface);
-    //}
+    std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
+    float prev_elapsed_time_cpu_milliseconds =
+        static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
 
-    //std::string endTimeString = currentTimeString();
-
-    //std::chrono::high_resolution_clock::time_point time_end_cpu = std::chrono::high_resolution_clock::now();
-
-
-    //std::chrono::duration<double, std::milli> duro = time_end_cpu - time_start_cpu;
-    //float prev_elapsed_time_cpu_milliseconds =
-    //    static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duro.count());
-
-    //printf("\n");
-    //printf("Time Taken: %fms", prev_elapsed_time_cpu_milliseconds);
-    //printf("\n");
+    printf("\n");
+    printf("Time Taken: %fms", prev_elapsed_time_cpu_milliseconds);
+    printf("\n");
 
 }
 
+void bboxPositionTest() {
+    Ray r;
+
+    //glm::vec3 intersectionPoint, normal;
+    //bool notBackface;
+
+    int hits = 0;
+    int misses = 0;
+
+    std::cout << std::endl;
+    for (float thetaDeg = -2; thetaDeg <= 2; thetaDeg += 0.1) {   // pitch
+        for (float phiDeg = -2; phiDeg <= 2; phiDeg += 0.1) {       // yaw
+            float theta = glm::radians((float)thetaDeg);
+            float phi = glm::radians((float)phiDeg);
+
+            // Spherical to Cartesian (unit vector)
+            r.direction = glm::vec3(0.f, 0.f, -1.f);
+            r.origin = glm::vec3(thetaDeg, phiDeg, 1);
+
+            float t = bboxIntersectionTest(r, glm::vec3(-2, -2, -1), glm::vec3(-1.5, -1, 1));
+
+            if (t > 0) {
+                hits++;
+                // Sanity check: intersection should be close to z = 0
+                //assert(fabs(intersectionPoint.z) < 1e-4);
+                std::cout << "O ";
+            }
+            else {
+                misses++;
+                std::cout << "X ";
+            }
+        }
+        std::cout << std::endl;
+    }
+
+    std::cout << "Total rays tested: " << (hits + misses) << "\n";
+    std::cout << "Hits: " << hits << ", Misses: " << misses << "\n";
+}
+
+// Will fail if first Geom is not a mesh
+void bvhTraversalTest(Scene* scene) {
+    Ray r = Ray();
+    r.origin = glm::vec3(0, 3, 10);
+    r.direction = glm::vec3(0, 0, -1);
+
+    glm::vec3 intersectionPoint;
+    glm::vec3 normal;
+    bool outside;
+
+    meshIntersectionTestBVH(scene->geoms[0], r, intersectionPoint, normal, outside);
+}
 //-------------------------------
 //-------------MAIN--------------
 //-------------------------------
@@ -509,8 +586,11 @@ int main(int argc, char** argv)
 
     // Testing Area
     #if TESTS
-    triangleTest();
-
+    //triangleTest();
+    //triangleAngleTest();
+    //trianglePositionTest();
+    //triangleSpeedTest();
+    //bboxPositionTest();
     #endif  
 
     if (argc < 2)
@@ -556,6 +636,12 @@ int main(int argc, char** argv)
     // Initialize ImGui Data
     InitImguiData(guiData);
     InitDataContainer(guiData);
+
+    // SCENE GEO TESTS
+#if TESTS
+    bvhTraversalTest(scene);
+#endif
+
 
     // GLFW main loop
     mainLoop();
@@ -618,6 +704,8 @@ void runCuda()
     if (iteration == 0)
     {
         pathtraceFree(scene);
+
+        // TESTING
         bool abridged = true;
         int n = scene->geoms[0].mesh.indCount;
         // ind

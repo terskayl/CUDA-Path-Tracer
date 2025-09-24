@@ -28,7 +28,9 @@ struct BvhNode
     glm::vec3 minBounds;
     unsigned short leftChild;
     unsigned short rightChild;
+    // In num floats, so offset / 3 = triangle count
     int trisOffset;
+    // In num floats, so 3 * triangle count
     int trisLength;
 };
 

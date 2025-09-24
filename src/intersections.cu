@@ -1,4 +1,9 @@
 #include "intersections.h"
+#include "utilities.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/matrix_inverse.hpp>
+
 
 __host__ __device__ float boxIntersectionTest(
     Geom box,
@@ -50,6 +55,80 @@ __host__ __device__ float boxIntersectionTest(
         }
         intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
         normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
+        return glm::length(r.origin - intersectionPoint);
+    }
+
+    return -1;
+}
+
+// Assume Ray r is pretransformed into local space of the mesh.
+__host__ __device__ float bboxIntersectionTest(
+    Ray r, glm::vec3 minBounds, glm::vec3 maxBounds)
+{
+    glm::vec3 center = 0.5f * (minBounds + maxBounds);
+    glm::vec3 scale = maxBounds - minBounds;
+    glm::mat4 transform = {
+        scale.x,  0.0f,     0.0f,     0.0f,
+        0.0f,     scale.y,  0.0f,     0.0f,
+        0.0f,     0.0f,     scale.z,  0.0f,
+        center.x, center.y, center.z, 1.0f
+    };
+    glm::mat4 inverseTransform = {
+        1.0f / scale.x, 0.0f,        0.0f,        0.0f,
+        0.0f,        1.0f / scale.y, 0.0f,        0.0f,
+        0.0f,        0.0f,        1.0f / scale.z, 0.0f,
+       -center.x / scale.x, -center.y / scale.y, -center.z / scale.z, 1.0f
+    };
+    glm::mat4 invTranspose = {
+        1.0f / scale.x, 0.0f,        0.0f,        0.0f,
+        0.0f,        1.0f / scale.y, 0.0f,        0.0f,
+        0.0f,        0.0f,        1.0f / scale.z, 0.0f,
+        0.0f,        0.0f,        0.0f,           1.0f
+    };
+
+    Ray q;
+    q.origin = multiplyMV(inverseTransform, glm::vec4(r.origin, 1.0f));
+    q.direction = glm::normalize(multiplyMV(inverseTransform, glm::vec4(r.direction, 0.0f)));
+
+    float tmin = -1e38f;
+    float tmax = 1e38f;
+    glm::vec3 tmin_n;
+    glm::vec3 tmax_n;
+    for (int xyz = 0; xyz < 3; ++xyz)
+    {
+        float qdxyz = q.direction[xyz];
+        /*if (glm::abs(qdxyz) > 0.00001f)*/
+        {
+            float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
+            float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
+            float ta = glm::min(t1, t2);
+            float tb = glm::max(t1, t2);
+            glm::vec3 n;
+            n[xyz] = t2 < t1 ? +1 : -1;
+            if (ta > 0 && ta > tmin)
+            {
+                tmin = ta;
+                tmin_n = n;
+            }
+            if (tb < tmax)
+            {
+                tmax = tb;
+                tmax_n = n;
+            }
+        }
+    }
+
+    if (tmax >= tmin && tmax > 0)
+    {
+        //outside = true;
+        if (tmin <= 0)
+        {
+            tmin = tmax;
+            tmin_n = tmax_n;
+            //outside = false;
+        }
+        glm::vec3 intersectionPoint = multiplyMV(transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
+        //normal = glm::normalize(multiplyMV(box.invTranspose, glm::vec4(tmin_n, 0.0f)));
         return glm::length(r.origin - intersectionPoint);
     }
 
@@ -206,13 +285,7 @@ __host__ __device__ float meshIntersectionTestNaive(
         return -1;
     }
     intersectionPoint = multiplyMV(geom.transform, glm::vec4(getPointOnRay(q, min_t), 1.0f));
-    assert(!isnan(min_normal.x));
-    assert(!isnan(min_normal.y));
-    assert(!isnan(min_normal.z));
     normal = glm::normalize(multiplyMV(geom.invTranspose, glm::vec4(min_normal, 0.0f)));
-    assert(!isnan(normal.x));
-    assert(!isnan(normal.y));
-    assert(!isnan(normal.z));
     return glm::length(r.origin - intersectionPoint);
 
     return min_t;
@@ -226,6 +299,70 @@ __host__ __device__ float meshIntersectionTestBVH(
     glm::vec3& normal,
     bool& outside)
 {
-    const Mesh& mesh = geom.mesh;
-    return -1;
+    const Mesh mesh = geom.mesh;
+    float min_t = INFINITY; 
+    glm::vec3 min_intersect, min_normal;
+    bool min_outside;
+    
+    Ray q;
+    q.origin = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
+    q.direction = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f)));
+    assert(abs(glm::length(q.direction) - 1) < 0.01);
+    
+    assert(mesh.numBvhNodes > 0);
+    // DFS
+    const int MAX_BVH_DEPTH = 20; // Also change in scene.cpp
+    unsigned short stack[MAX_BVH_DEPTH];
+    stack[0] = 0;
+    int stackIdx = 0;
+
+    while (stackIdx > -1) {
+        // pop from our stack
+        BvhNode& currNode = mesh.bvhNodes[stack[stackIdx]];
+        stackIdx--;
+
+        int bbox_t = bboxIntersectionTest(q, currNode.minBounds, currNode.maxBounds);
+        if (bbox_t == -1) continue;
+
+        // Nodes should either have two children or none.
+        assert((currNode.leftChild <= 0 && currNode.rightChild <= 0) ||
+            (currNode.leftChild > 0 && currNode.rightChild > 0));
+        // nodes set their child values to 0 when they are a leaf,
+        // as index 0 cannot be a child
+        if (currNode.leftChild > 0 && currNode.rightChild > 0) {
+            stackIdx++;
+            stack[stackIdx] = currNode.leftChild;
+            stackIdx++;
+            stack[stackIdx] = currNode.rightChild;
+        }
+        else {
+            // Leaf node, so we should go through its triangles
+            for (int i = 0; i < currNode.trisLength / 3; ++i) {
+                glm::vec3 tmp_intersect, tmp_normal;
+                bool tmp_outside;
+                float t = triangleIntersectionTest(
+                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i]],
+                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i + 1]],
+                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i + 2]],
+                    q, tmp_intersect, tmp_normal, tmp_outside);
+
+                if (t > 0 && t < min_t) {
+                    min_t = t;
+                    min_intersect = tmp_intersect;
+                    min_normal = tmp_normal;
+                    min_outside = tmp_outside;
+                }
+            }
+
+        }
+
+    }
+
+    if (min_t == INFINITY) {
+        return -1;
+    }
+
+    intersectionPoint = multiplyMV(geom.transform, glm::vec4(getPointOnRay(q, min_t), 1.0f));
+    normal = glm::normalize(multiplyMV(geom.invTranspose, glm::vec4(min_normal, 0.0f)));
+    return glm::length(r.origin - intersectionPoint);
 }

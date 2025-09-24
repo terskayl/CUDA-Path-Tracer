@@ -27,7 +27,7 @@
 
 #define STREAMCOMPACTION 1
 #define MATERIALSORTING 1
-#define BVH 0;
+#define BVH 1;
 
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)

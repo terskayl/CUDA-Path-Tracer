@@ -239,7 +239,11 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         if (mat.extensions.count("KHR_materials_transmission")) {
             newMat.transmission = mat.extensions.find("KHR_materials_transmission")->second.Get("transmissionFactor").GetNumberAsDouble();
         }
+
         newMat.emissive = doubleArrayToVec3(mat.emissiveFactor);
+        if (mat.extensions.count("KHR_materials_emissive_strength")) {
+            newMat.emissive *= mat.extensions.find("KHR_materials_emissive_strength")->second.Get("emissiveStrength").GetNumberAsDouble();
+        }
         newMat.emissiveTexture = mat.emissiveTexture.index;
 
         newMat.normalTexture = mat.normalTexture.index;
@@ -446,6 +450,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     state.image.resize(arraylen);
     std::fill(state.image.begin(), state.image.end(), glm::vec3());
 
+    return true;
 }
 
 void Scene::buildBVH(Mesh& mesh) {
@@ -479,7 +484,7 @@ void Scene::buildBVH(Mesh& mesh) {
 
     nodesToProcess.push_back(root.get());
 
-    const int BVH_MAX_LAYERS = 20;
+    const int BVH_MAX_LAYERS = 20; // Also change in intersections.cu
     for (int i = 0; i < BVH_MAX_LAYERS; ++i) {
         int layerSize = 0;
         for (CpuBvhNode* nodePtr : nodesToProcess) {
