@@ -642,6 +642,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_paths,
             dev_materials
         );
+        checkCUDAError("shading");
 
 #if STREAMCOMPACTION
         num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_pathsPong, dev_paths);

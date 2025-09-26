@@ -54,6 +54,8 @@ __host__ __device__ void sampleAndResolveDiffuse(
     const Material& m,
     thrust::default_random_engine& rng) {
 
+    const float epsilon = 1e-3;
+    pathSegment.ray.origin = intersect + epsilon * normal;
     pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
     // bsdf evaluates to m.basecolor / pi. But the pdf is 1 / pi,
     // so it cancels out to m.basecolor;
@@ -66,6 +68,15 @@ __host__ __device__ void sampleAndResolveSpecularRefl(
     glm::vec3 normal,
     const Material& m,
     thrust::default_random_engine& rng) {
+
+    const float epsilon = 1e-3;
+    bool isEntering = dot(normal, pathSegment.ray.direction) < 0;
+    if (isEntering) {
+        pathSegment.ray.origin = intersect + epsilon * normal;
+    }
+    else {
+        pathSegment.ray.origin = intersect + epsilon * -normal;
+    }
 
     glm::vec3 dir = pathSegment.ray.direction;
     pathSegment.ray.direction = dir - 2 * glm::dot(dir, normal) * normal;
@@ -88,11 +99,13 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     float etaB = 1.4f;// m.ior;
     float eta;
 
-
+    const float epsilon = 1e-3;
     if (isEntering) {
+        pathSegment.ray.origin = intersect + epsilon * -normal;
         eta = etaA / etaB;
     }
     else {
+        pathSegment.ray.origin = intersect + epsilon * normal;
         eta = etaB / etaA;
         normal = -normal;
     }
@@ -111,8 +124,59 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     return;
 }
 
+__host__ __device__ float calculateFrenelDielectric(
+    PathSegment& pathSegment,
+    glm::vec3 normal) {
 
+    glm::vec3 w_i = pathSegment.ray.direction; // CHECK: negate?
+    float cosTheta_i = dot(w_i, normal);
 
+    float etaI = 1.;
+    float etaT = 1.4; // m.ior
+
+    if (cosTheta_i < 0) {
+        etaI = etaT;
+        etaT = 1.;
+        cosTheta_i = abs(cosTheta_i);
+    }
+
+    if (cosTheta_i > 1.f) {
+        cosTheta_i = 1.f;
+    }
+
+    float sinTheta_i = sqrt(max(0.f, 1 - cosTheta_i * cosTheta_i));
+    float sinTheta_t = etaI / etaT * sinTheta_i;
+    if (sinTheta_t >= 1.) {
+        return 1.f;
+    }
+    float cosThetaT = sqrt(max(0.f, 1 - sinTheta_t * sinTheta_t));
+    float Rparl = ((etaT * cosTheta_i) - (etaI * cosThetaT)) /
+        ((etaT * cosTheta_i) + (etaI * cosThetaT));
+    float Rperp = ((etaI * cosTheta_i) - (etaT * cosThetaT)) /
+        ((etaI * cosTheta_i) + (etaT * cosThetaT));
+    return (Rparl * Rparl + Rperp * Rperp) / 2.f;
+
+}
+
+__host__ __device__ void sampleAndResolveGlass(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    thrust::default_random_engine& rng) {
+
+    float fresnel = calculateFrenelDielectric(pathSegment, normal);
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float random = u01(rng);
+
+    if (random > fresnel) {
+        sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
+    }
+    else {
+        sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, rng);
+    }
+
+}
 
 __host__ __device__ void scatterRay(
     PathSegment & pathSegment,
@@ -126,17 +190,19 @@ __host__ __device__ void scatterRay(
     // calculateRandomDirectionInHemisphere defined above.
 
     // Glass fails at epsilon 1e-5.
-    float epsilon = 1e-4;
+    float epsilon = 1e-3;
     
     if (m.roughness == 0) {
-        bool isEntering = dot(normal, pathSegment.ray.direction) < 0;
-        if (isEntering) {
-            pathSegment.ray.origin = intersect + epsilon * -normal;
-        }
-        else {
-            pathSegment.ray.origin = intersect + epsilon * normal;
-        }
-        sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
+        sampleAndResolveGlass(pathSegment, intersect, normal, m, rng);
+        //float fresnel = calculateFrenelDielectric(pathSegment, normal);
+        //pathSegment.radiance = fresnel * glm::vec3(1, 0, 0) + (1 - fresnel) * glm::vec3(0, 0, 1);
+        //if (fresnel > 0.01f && fresnel < 0.1f) {
+        //    pathSegment.radiance = glm::vec3(0, 1, 0);
+        //}
+        //pathSegment.radiance = glm::vec3(fresnel);
+        //pathSegment.throughput = fresnel * glm::vec3(100, 0, 0) + (1 - fresnel) * glm::vec3(0, 100, 0);
+        //pathSegment.remainingBounces = 0;
+        //sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
     }
     else{
         pathSegment.ray.origin = intersect + epsilon * normal;

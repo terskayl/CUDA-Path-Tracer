@@ -389,22 +389,23 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                 }
             }
 
-            for (int i = 0; i < newGeom.mesh.posCount; ++i) {
-                glm::vec3 v = newGeom.mesh.pos[i];
-                std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
-            }
-            for (int i = 0; i < newGeom.mesh.norCount; ++i) {
-                glm::vec3 v = newGeom.mesh.nor[i];
-                std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
-            }
-            for (int i = 0; i < newGeom.mesh.uvCount; ++i) {
-                glm::vec2 v = newGeom.mesh.uv[i];
-                std::cout << v.r << ", " << v.g << std::endl;
-            }
-            for (int i = 0; i < newGeom.mesh.indCount; ++i) {
-                unsigned short s = newGeom.mesh.ind[i];
-                std::cout << s << std::endl;
-            }
+            // TESTING
+            //for (int i = 0; i < newGeom.mesh.posCount; ++i) {
+            //    glm::vec3 v = newGeom.mesh.pos[i];
+            //    std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
+            //}
+            //for (int i = 0; i < newGeom.mesh.norCount; ++i) {
+            //    glm::vec3 v = newGeom.mesh.nor[i];
+            //    std::cout << v.r << ", " << v.g << ", " << v.b << std::endl;
+            //}
+            //for (int i = 0; i < newGeom.mesh.uvCount; ++i) {
+            //    glm::vec2 v = newGeom.mesh.uv[i];
+            //    std::cout << v.r << ", " << v.g << std::endl;
+            //}
+            //for (int i = 0; i < newGeom.mesh.indCount; ++i) {
+            //    unsigned short s = newGeom.mesh.ind[i];
+            //    std::cout << s << std::endl;
+            //}
 
             buildBVH(newGeom.mesh);
 
@@ -542,14 +543,14 @@ void Scene::buildBVH(Mesh& mesh) {
     }
 
     // Testing
-    printBVH(root);
+    //printBVH(root);
     // END TESTING
 
     // Put in format better for GPU.
     formatBVH(root, mesh);
 
     //More Testing - Print GPU formatted data.
-    bool abridged = false;
+    bool abridged = true;
     printf("\n\n\n\n");
     printf("    [ ");
     for (int i = 0; i < mesh.numBvhNodes; i++) {
