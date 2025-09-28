@@ -4,6 +4,9 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/matrix_inverse.hpp>
 
+// Interpolated normals using the nor buffers - can 
+// result in black geometry if normals are backwards.
+#define SMOOTHSHADING 1
 
 __host__ __device__ float boxIntersectionTest(
     Geom box,
@@ -195,6 +198,7 @@ __host__ __device__ float triangleIntersectionTest(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec3& baryWeights,
     bool& notBackface)
 {
 
@@ -232,6 +236,8 @@ __host__ __device__ float triangleIntersectionTest(
 
     float area123 = glm::length(glm::cross(p2 - p1, p3 - p1));
 
+    baryWeights = glm::vec3(areaS23 / area123, areaS31 / area123, areaS12 / area123);
+
     float diff = fabs((areaS12 + areaS23 + areaS31) - area123);
     if (diff < 1e-5) {
         normal = currNormal;
@@ -248,12 +254,20 @@ __host__ __device__ float meshIntersectionTestNaive(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec2& uv,
+    glm::vec3& tangent,
+    glm::vec3& bitangent,
     bool& outside)
 {
     const Mesh& mesh = geom.mesh;
     float min_t = INFINITY;
     glm::vec3 min_intersect, min_normal;
+    glm::vec3 min_baryCoords;
     bool min_outside;
+    
+    int min_v0 = -1;
+    int min_v1 = -1;
+    int min_v2 = -1;
 
     Ray q;
     q.origin = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
@@ -262,18 +276,28 @@ __host__ __device__ float meshIntersectionTestNaive(
 
     for (int i = 0; i < mesh.indCount / 3.f; ++i) {
         glm::vec3 tmp_intersect, tmp_normal;
+        glm::vec3 tmp_baryCoords;
         bool tmp_outside;
+        int v0 = mesh.ind[3 * i];
+        int v1 = mesh.ind[3 * i + 1];
+        int v2 = mesh.ind[3 * i + 2];
+
         float t = triangleIntersectionTest(
-            mesh.pos[mesh.ind[3 * i]],
-            mesh.pos[mesh.ind[3 * i + 1]],
-            mesh.pos[mesh.ind[3 * i + 2]],
-            q, tmp_intersect, tmp_normal, tmp_outside);
+            mesh.pos[v0],
+            mesh.pos[v1],
+            mesh.pos[v2],
+            q, tmp_intersect, tmp_normal, tmp_baryCoords, tmp_outside);
 
         if (t > 0 && t < min_t) {
             min_t = t;
             min_intersect = tmp_intersect;
             min_normal = tmp_normal;
+            min_baryCoords = tmp_baryCoords;
             min_outside = tmp_outside;
+
+            min_v0 = v0;
+            min_v1 = v1;
+            min_v2 = v2;
         }
     }
 
@@ -282,9 +306,29 @@ __host__ __device__ float meshIntersectionTestNaive(
     }
     intersectionPoint = multiplyMV(geom.transform, glm::vec4(getPointOnRay(q, min_t), 1.0f));
     normal = glm::normalize(multiplyMV(geom.invTranspose, glm::vec4(min_normal, 0.0f)));
-    return glm::length(r.origin - intersectionPoint);
+    
+    if (geom.mesh.uvCount > 0) {
+        uv = min_baryCoords.x * mesh.uv[min_v0] + min_baryCoords.y * mesh.uv[min_v1] + min_baryCoords.z * mesh.uv[min_v2];
 
-    return min_t;
+        // Calculate tangent and bitangent for normal mapping
+        glm::vec3 p10 = mesh.pos[min_v1] - mesh.pos[min_v0];
+        glm::vec3 p20 = mesh.pos[min_v2] - mesh.pos[min_v0];
+
+        glm::vec2 uv10 = mesh.uv[min_v1] - mesh.uv[min_v0];
+        glm::vec2 uv20 = mesh.uv[min_v2] - mesh.uv[min_v0];
+
+        float r = 1.f / (uv10.x * uv20.y - uv10.y * uv20.x);
+        tangent = glm::normalize((p10 * uv20.y - p20 * uv10.y) * r);
+        bitangent = glm::normalize((p20 * uv10.x - p10 * uv20.x) * r);
+    }
+    // Override normals for a mesh. Potential TODO - make this togglable for flat shading.
+#if SMOOTHSHADING
+    if (geom.mesh.norCount > 0) {
+        normal = min_baryCoords.x * mesh.nor[min_v0] + min_baryCoords.y * mesh.nor[min_v1] + min_baryCoords.z * mesh.nor[min_v2];
+    }
+#endif
+
+    return glm::length(r.origin - intersectionPoint);
 }
 
 // Requires BVH TO OPERATE
@@ -293,13 +337,21 @@ __host__ __device__ float meshIntersectionTestBVH(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec2& uv,
+    glm::vec3& tangent,
+    glm::vec3& bitangent,
     bool& outside)
 {
     const Mesh mesh = geom.mesh;
     float min_t = INFINITY; 
     glm::vec3 min_intersect, min_normal;
+    glm::vec3 min_baryCoords;
     bool min_outside;
     
+    int min_v0 = -1;
+    int min_v1 = -1;
+    int min_v2 = -1;
+
     Ray q;
     q.origin = multiplyMV(geom.inverseTransform, glm::vec4(r.origin, 1.0f));
     q.direction = glm::normalize(multiplyMV(geom.inverseTransform, glm::vec4(r.direction, 0.0f)));
@@ -335,18 +387,29 @@ __host__ __device__ float meshIntersectionTestBVH(
             // Leaf node, so we should go through its triangles
             for (int i = 0; i < currNode.trisLength / 3; ++i) {
                 glm::vec3 tmp_intersect, tmp_normal;
+                glm::vec3 tmp_baryCoords;
                 bool tmp_outside;
+
+                int v0 = mesh.indBVH[currNode.trisOffset + 3 * i];
+                int v1 = mesh.indBVH[currNode.trisOffset + 3 * i + 1];
+                int v2 = mesh.indBVH[currNode.trisOffset + 3 * i + 2];
+
                 float t = triangleIntersectionTest(
-                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i]],
-                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i + 1]],
-                    mesh.pos[mesh.indBVH[currNode.trisOffset + 3 * i + 2]],
-                    q, tmp_intersect, tmp_normal, tmp_outside);
+                    mesh.pos[v0],
+                    mesh.pos[v1],
+                    mesh.pos[v2],
+                    q, tmp_intersect, tmp_normal, tmp_baryCoords, tmp_outside);
 
                 if (t > 0 && t < min_t) {
                     min_t = t;
                     min_intersect = tmp_intersect;
                     min_normal = tmp_normal;
+                    min_baryCoords = tmp_baryCoords;
                     min_outside = tmp_outside;
+
+                    min_v0 = v0;
+                    min_v1 = v1;
+                    min_v2 = v2;
                 }
             }
 
@@ -360,5 +423,27 @@ __host__ __device__ float meshIntersectionTestBVH(
 
     intersectionPoint = multiplyMV(geom.transform, glm::vec4(getPointOnRay(q, min_t), 1.0f));
     normal = glm::normalize(multiplyMV(geom.invTranspose, glm::vec4(min_normal, 0.0f)));
+    
+    if (geom.mesh.uvCount > 0) {
+        uv = min_baryCoords.x * mesh.uv[min_v0] + min_baryCoords.y * mesh.uv[min_v1] + min_baryCoords.z * mesh.uv[min_v2];
+
+        // Calculate tangent and bitangent for normal mapping
+        glm::vec3 p10 = mesh.pos[min_v1] - mesh.pos[min_v0];
+        glm::vec3 p20 = mesh.pos[min_v2] - mesh.pos[min_v0];
+
+        glm::vec2 uv10 = mesh.uv[min_v1] - mesh.uv[min_v0];
+        glm::vec2 uv20 = mesh.uv[min_v2] - mesh.uv[min_v0];
+
+        float r = 1.f / (uv10.x * uv20.y - uv10.y * uv20.x);
+        tangent = glm::normalize((p10 * uv20.y - p20 * uv10.y) * r);
+        bitangent = glm::normalize((p20 * uv10.x - p10 * uv20.x) * r);
+    }
+    // Override normals for a mesh. Potential TODO - make this togglable for flat shading.
+#if SMOOTHSHADING
+    if (geom.mesh.norCount > 0) {
+        normal = min_baryCoords.x * mesh.nor[min_v0] + min_baryCoords.y * mesh.nor[min_v1] + min_baryCoords.z * mesh.nor[min_v2];
+    }
+#endif
+
     return glm::length(r.origin - intersectionPoint);
 }

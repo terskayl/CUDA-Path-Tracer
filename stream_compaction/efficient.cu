@@ -286,6 +286,10 @@ namespace StreamCompaction {
                 oIntersects[falseIndices[idx]].materialId = iIntersects[idx].materialId;
                 oIntersects[falseIndices[idx]].t = iIntersects[idx].t;
                 oIntersects[falseIndices[idx]].surfaceNormal = iIntersects[idx].surfaceNormal;
+                oIntersects[falseIndices[idx]].uvCoord = iIntersects[idx].uvCoord;
+                oIntersects[falseIndices[idx]].surfaceTangent = iIntersects[idx].surfaceTangent;
+                oIntersects[falseIndices[idx]].surfaceBitangent = iIntersects[idx].surfaceBitangent;
+
             }
             else {
                 odata[idx - falseIndices[idx] + total].pixelIndex = idata[idx].pixelIndex;
@@ -298,6 +302,9 @@ namespace StreamCompaction {
                 oIntersects[idx - falseIndices[idx] + total].materialId = iIntersects[idx].materialId;
                 oIntersects[idx - falseIndices[idx] + total].t = iIntersects[idx].t;
                 oIntersects[idx - falseIndices[idx] + total].surfaceNormal = iIntersects[idx].surfaceNormal;
+                oIntersects[idx - falseIndices[idx] + total].uvCoord = iIntersects[idx].uvCoord;
+                oIntersects[idx - falseIndices[idx] + total].surfaceTangent = iIntersects[idx].surfaceTangent;
+                oIntersects[idx - falseIndices[idx] + total].surfaceBitangent = iIntersects[idx].surfaceBitangent;
 
             }
         }

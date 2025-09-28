@@ -123,6 +123,7 @@ struct Material
     bool unlit = false;
 
     int normalTexture = -1;
+    int normalTextureScale = 1;
     int occlusionTexture = -1; // Low priority, usually R channel of rough-metal
 
     bool doubleSided = true; // Low-priority
@@ -137,6 +138,24 @@ struct Material
     4  : metallic
     5  : trasmissive
     */
+};
+
+struct Texture { // DOESN"T WORK< NEEDS TO BE ON THE MAIN THREAD OR SMTG.
+    cudaTextureObject_t d_texHandle = 0;
+    cudaArray_t d_data = nullptr;
+    std::vector<uint8_t> data;
+
+    int width = 0;
+    int height = 0;
+    int bitsPerChannel = 0;
+    int numChannels = 0;
+
+};
+
+struct DeviceTexture {
+    cudaTextureObject_t texHandle = 0;
+    int width = 0;
+    int height = 0;
 };
 
 struct Camera
@@ -176,5 +195,9 @@ struct ShadeableIntersection
 {
   float t;
   glm::vec3 surfaceNormal;
+  // Only meshes will have uvCoords
+  glm::vec2 uvCoord;
+  glm::vec3 surfaceTangent;
+  glm::vec3 surfaceBitangent;
   int materialId;
 };

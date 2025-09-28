@@ -28,7 +28,7 @@
 #include <string>
 #include <chrono>
 
-#define TESTS 0
+#define TESTS 1
 
 static std::string startTimeString;
 
@@ -350,11 +350,11 @@ void triangleTest() {
     r.direction = glm::vec3(0, 0, -1);
 
     glm::vec3 intersectionPoint;
-    glm::vec3 normal;
+    glm::vec3 normal, baryWeights;
     bool notBackface;
     // NOTE CCW
     float t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t != -1);
 
     printf("Intersection Point: %f, %f, %f. Normal: %f, %f, %f. Frontface?: %i. t=%f",
@@ -364,35 +364,35 @@ void triangleTest() {
 
     r.direction = glm::vec3(0, 0, 1);
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t == -1);
 
     r.direction = glm::vec3(0, 1, 0);
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t == -1);
 
     r.direction = glm::vec3(1, 0, 0);
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t == -1);
 
     r.direction = glm::normalize(glm::vec3(1, 0, 1));
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t == -1);
 
     r.origin = glm::vec3(0, 0, 0.5);
     r.direction = glm::normalize(glm::vec3(1, 0, -1));
     t = triangleIntersectionTest(glm::vec3(-1, -1, 0), glm::vec3(1, 0, 0), glm::vec3(-1, 1, 0), r,
-        intersectionPoint, normal, notBackface);
+        intersectionPoint, normal, baryWeights, notBackface);
     assert(t != -1);
 }
 
 void triangleAngleTest() {
     Ray r;
 
-    glm::vec3 intersectionPoint, normal;
+    glm::vec3 intersectionPoint, normal, baryWeights;
     bool notBackface;
 
     // Define a triangle lying flat in the XY plane
@@ -420,7 +420,7 @@ void triangleAngleTest() {
             ));
 
             float t = triangleIntersectionTest(v0, v1, v2, r,
-                intersectionPoint, normal, notBackface);
+                intersectionPoint, normal, baryWeights, notBackface);
 
             if (t > 0) {
                 hits++;
@@ -444,7 +444,7 @@ void triangleAngleTest() {
 void trianglePositionTest() {
     Ray r;
 
-    glm::vec3 intersectionPoint, normal;
+    glm::vec3 intersectionPoint, normal, baryWeights;
     bool notBackface;
     // Define a triangle lying flat in the XY plane
     glm::vec3 v0(-1, -1, 0);
@@ -465,7 +465,7 @@ void trianglePositionTest() {
             r.origin = glm::vec3(thetaDeg, phiDeg, 1);
 
             float t = triangleIntersectionTest(v0, v1, v2, r,
-                intersectionPoint, normal, notBackface);
+                intersectionPoint, normal, baryWeights, notBackface);
 
             if (t > 0) {
                 hits++;
@@ -492,7 +492,7 @@ void triangleSpeedTest() {
     r.direction = glm::vec3(0, 0, -1);
 
     glm::vec3 intersectionPoint;
-    glm::vec3 normal;
+    glm::vec3 normal, baryWeights;
     bool notBackface;
     //run 1 million times.
     std::chrono::high_resolution_clock::time_point time_start_cpu = std::chrono::high_resolution_clock::now();
@@ -507,7 +507,7 @@ void triangleSpeedTest() {
         float t = triangleIntersectionTest(glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
             glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
             glm::vec3(static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX), static_cast<float>(rand()) / static_cast<float>(RAND_MAX)),
-            r, intersectionPoint, normal, notBackface);
+            r, intersectionPoint, normal, baryWeights, notBackface);
     }
 
     std::string endTimeString = currentTimeString();
@@ -572,9 +572,10 @@ void bvhTraversalTest(Scene* scene) {
 
     glm::vec3 intersectionPoint;
     glm::vec3 normal;
+    glm::vec2 uv;
     bool outside;
 
-    meshIntersectionTestBVH(scene->geoms[0], r, intersectionPoint, normal, outside);
+    meshIntersectionTestBVH(scene->geoms[0], r, intersectionPoint, normal, uv, glm::vec3(), glm::vec3(), outside);
 }
 
 // Needs copy of sampleAndResolveSpecularTrans from interactions.cu to run
@@ -669,7 +670,7 @@ int main(int argc, char** argv)
 
     // Testing Area
     #if TESTS
-    //triangleTest();
+    triangleTest();
     //triangleAngleTest();
     //trianglePositionTest();
     //triangleSpeedTest();

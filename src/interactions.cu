@@ -52,6 +52,7 @@ __host__ __device__ void sampleAndResolveDiffuse(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
+    glm::vec3 color,
     thrust::default_random_engine& rng) {
 
     const float epsilon = 1e-3;
@@ -59,7 +60,7 @@ __host__ __device__ void sampleAndResolveDiffuse(
     pathSegment.ray.direction = calculateRandomDirectionInHemisphere(normal, rng);
     // bsdf evaluates to m.basecolor / pi. But the pdf is 1 / pi,
     // so it cancels out to m.basecolor;
-    pathSegment.throughput *= m.baseColor;
+    pathSegment.throughput *= color;
 }
 
 __host__ __device__ void sampleAndResolveSpecularRefl(
@@ -67,6 +68,7 @@ __host__ __device__ void sampleAndResolveSpecularRefl(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
+    glm::vec3 color,
     thrust::default_random_engine& rng) {
 
     const float epsilon = 1e-3;
@@ -90,6 +92,7 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
+    glm::vec3 color,
     thrust::default_random_engine& rng) {
 
     glm::vec3 w_i = pathSegment.ray.direction;
@@ -145,12 +148,12 @@ __host__ __device__ float calculateFrenelDielectric(
     }
 
     float sinTheta_i = sqrt(max(0.f, 1 - cosTheta_i * cosTheta_i));
-    float sinTheta_t = etaI / etaT * sinTheta_i;
-    if (sinTheta_t >= 1.) {
-        return 1.f;
-    }
+    float sinTheta_t = etaT / etaI * sinTheta_i;
+    //if (sinTheta_t > 1.0) {
+    //    return 1.f;
+    //}
     float cosThetaT = sqrt(max(0.f, 1 - sinTheta_t * sinTheta_t));
-    float Rparl = ((etaT * cosTheta_i) - (etaI * cosThetaT)) /
+    float Rparl = ((etaT * cosTheta_i) - (etaI * cosThetaT)) /+
         ((etaT * cosTheta_i) + (etaI * cosThetaT));
     float Rperp = ((etaI * cosTheta_i) - (etaT * cosThetaT)) /
         ((etaI * cosTheta_i) + (etaT * cosThetaT));
@@ -163,6 +166,7 @@ __host__ __device__ void sampleAndResolveGlass(
     glm::vec3 intersect,
     glm::vec3 normal,
     const Material& m,
+    glm::vec3 color,
     thrust::default_random_engine& rng) {
 
     float fresnel = calculateFrenelDielectric(pathSegment, normal);
@@ -170,30 +174,57 @@ __host__ __device__ void sampleAndResolveGlass(
     float random = u01(rng);
 
     if (random > fresnel) {
-        sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
+        sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, color, rng);
     }
     else {
-        sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, rng);
+        sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
     }
 
 }
 
-__host__ __device__ void scatterRay(
-    PathSegment & pathSegment,
+
+// Scatter ray cannot be called on the host as it samples textures.
+__device__ void scatterRay(
+    PathSegment& pathSegment,
     glm::vec3 intersect,
     glm::vec3 normal,
-    const Material &m,
-    thrust::default_random_engine &rng)
+    const Material& m,
+    DeviceTexture* texArr,
+    glm::vec2 uv,
+    glm::vec3 tangent,
+    glm::vec3 bitangent,
+    thrust::default_random_engine& rng)
 {
-    // TODO: implement this.
-    // A basic implementation of pure-diffuse shading will just call the
-    // calculateRandomDirectionInHemisphere defined above.
-
     // Glass fails at epsilon 1e-5.
     float epsilon = 1e-3;
-    
+    // Add normal map to normals if applicable.
+    if (m.normalTexture != -1) {
+        cudaTextureObject_t normalTexture = texArr[m.normalTexture].texHandle;
+
+        float4 normalMapReading = tex2D<float4>(normalTexture, uv.x, uv.y);
+        glm::vec3 normalDiff = (glm::vec3(normalMapReading.x, normalMapReading.y, normalMapReading.z) * 2.f) - glm::vec3(-1.f);
+
+        normalDiff.x *= m.normalTextureScale;
+        normalDiff.y *= m.normalTextureScale;
+        normalDiff = glm::normalize(normalDiff);
+
+        normal = normal * normalDiff.b, tangent * normalDiff.r + bitangent * normalDiff.g;
+    }
+
+    glm::vec3 color = m.baseColor;
+    if (m.baseColorTexture != -1) {
+        cudaTextureObject_t colorTexture = texArr[m.baseColorTexture].texHandle;
+
+        float4 colorMapReading = tex2D<float4>(colorTexture, uv.x, uv.y);
+        color = glm::vec3(
+            colorMapReading.x,
+            colorMapReading.y,
+            colorMapReading.z);
+    }
+    //color = normal;
+
     if (m.roughness == 0) {
-        sampleAndResolveGlass(pathSegment, intersect, normal, m, rng);
+        sampleAndResolveGlass(pathSegment, intersect, normal, m, color, rng);
         //float fresnel = calculateFrenelDielectric(pathSegment, normal);
         //pathSegment.radiance = fresnel * glm::vec3(1, 0, 0) + (1 - fresnel) * glm::vec3(0, 0, 1);
         //if (fresnel > 0.01f && fresnel < 0.1f) {
@@ -202,11 +233,11 @@ __host__ __device__ void scatterRay(
         //pathSegment.radiance = glm::vec3(fresnel);
         //pathSegment.throughput = fresnel * glm::vec3(100, 0, 0) + (1 - fresnel) * glm::vec3(0, 100, 0);
         //pathSegment.remainingBounces = 0;
-        //sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, rng);
+        //sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, color, rng);
     }
     else{
         pathSegment.ray.origin = intersect + epsilon * normal;
-        sampleAndResolveDiffuse(pathSegment, intersect, normal, m, rng);
+        sampleAndResolveDiffuse(pathSegment, intersect, normal, m, color, rng);
     }
 
 

@@ -96,6 +96,7 @@ __host__ __device__ float triangleIntersectionTest(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec3& baryWeights,
     bool& notBackface);
 
 /**
@@ -111,6 +112,9 @@ __host__ __device__ float meshIntersectionTestNaive(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec2& uv,
+    glm::vec3& tangent,
+    glm::vec3& bitangent,
     bool& outside);
 
 /**
@@ -126,4 +130,7 @@ __host__ __device__ float meshIntersectionTestBVH(
     Ray r,
     glm::vec3& intersectionPoint,
     glm::vec3& normal,
+    glm::vec2& uv,
+    glm::vec3& tangent,
+    glm::vec3& bitangent,
     bool& outside);

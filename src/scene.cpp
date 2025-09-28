@@ -248,6 +248,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         newMat.emissiveTexture = mat.emissiveTexture.index;
 
         newMat.normalTexture = mat.normalTexture.index;
+        newMat.normalTextureScale = mat.normalTexture.scale;
         newMat.occlusionTexture = mat.occlusionTexture.index;
 
         newMat.doubleSided = mat.doubleSided;
@@ -255,6 +256,25 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
 
         materials.push_back(newMat);
     }
+
+    // Textures & Load onto GPU
+    for (tinygltf::Texture& tex : model.textures) {
+        Texture newTex;
+        // TODO: samplers. For now we will only support linear texture sampling
+        tinygltf::Sampler sampler = model.samplers[tex.sampler];
+        tinygltf::Image img = model.images[tex.source];
+        
+        // TODO, for now we will only support textures with URIs. Not embedded textures
+        newTex.width = img.width;
+        newTex.height = img.height;
+        newTex.bitsPerChannel = img.bits;
+        newTex.numChannels = img.component;
+        newTex.data = img.image;
+
+        textures.push_back(newTex);
+    }
+
+
     bool cameraSet = false;
     // Loop through all nodes, then through meshes
     for (tinygltf::Node& node : model.nodes) {
