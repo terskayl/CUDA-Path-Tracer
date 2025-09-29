@@ -108,6 +108,57 @@ void Scene::loadFromJSON(const std::string& jsonName)
         newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
 
         geoms.push_back(newGeom);
+
+
+        // READ HDRI
+        //TODO Duplicate Code, refactor
+// TODO : Connect to UI
+        int x = 0, y = 0, channels = 0;
+        float* hdriData = stbi_loadf("C:/Users/njbhv/Documents/Code/CIS5650/Project3-CUDA-Path-Tracer/scenes/passendorf_snow_1k.hdr", &x, &y, &channels, 0);
+
+        if (x > 0 && y > 0) {
+            Texture hdri;
+            hdri.width = x;
+            hdri.height = y;
+            hdri.bitsPerChannel = 32; // via stbi_loadf
+            hdri.numChannels = channels;
+
+            int num_bytes = x * y * channels * sizeof(float);
+            hdri.data.resize(num_bytes);
+            memcpy(hdri.data.data(), hdriData, num_bytes);
+            textures.push_back(hdri);
+            hdriIndex = textures.size() - 1;
+        }
+        else {
+            const char* reason = stbi_failure_reason();
+            if (reason) {
+                std::cerr << "Failure reason: " << reason << std::endl;
+            }
+        }
+
+        // Pad 3 channel textures to 4 channels.
+        for (Texture& t : textures) {
+            if (t.numChannels == 3) {
+                int elemSize = t.bitsPerChannel / 8;
+
+                std::vector<uint8_t> paddedData;
+                for (int i = 0; i < t.data.size(); ++i) {
+                    int realIndex = i / elemSize;
+                    paddedData.push_back(t.data[i]);
+                    if (i % (3 * elemSize) == 3 * elemSize - 1) {
+                        for (int j = 0; j < elemSize; ++j) {
+                            paddedData.push_back(0);
+                        }
+                    }
+
+                }
+                t.data = paddedData;
+                t.numChannels = 4;
+            }
+        }
+
+
+
     }
     const auto& cameraData = data["Camera"];
     Camera& camera = state.camera;
@@ -275,8 +326,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     }
 
     // READ HDRI
+    // TODO : Connect to UI
     int x = 0, y = 0, channels = 0;
-    float* hdriData = stbi_loadf("./scenes/passendorf_snow_2k.hdr", &x, &y, &channels, 0);
+    float* hdriData = stbi_loadf("C:/Users/njbhv/Documents/Code/CIS5650/Project3-CUDA-Path-Tracer/scenes/passendorf_snow_1k.hdr", &x, &y, &channels, 0);
 
     if (x > 0 && y > 0) {
         Texture hdri;
@@ -289,9 +341,35 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         hdri.data.resize(num_bytes);
         memcpy(hdri.data.data(), hdriData, num_bytes);
         textures.push_back(hdri);
-        hasHDRI = true;
+        hdriIndex = textures.size() - 1;
+    }
+    else {
+        const char* reason = stbi_failure_reason();
+        if (reason) {
+            std::cerr << "Failure reason: " << reason << std::endl;
+        }
     }
 
+    // Pad 3 channel textures to 4 channels.
+    for (Texture& t : textures) {
+        if (t.numChannels == 3) {
+            int elemSize = t.bitsPerChannel / 8;
+
+            std::vector<uint8_t> paddedData;
+            for (int i = 0; i < t.data.size(); ++i) {
+                int realIndex = i / elemSize;
+                paddedData.push_back(t.data[i]);
+                if (i % (3 * elemSize) == 3 * elemSize - 1) {
+                    for (int j = 0; j < elemSize; ++j) {
+                        paddedData.push_back(0);
+                    }
+                }
+
+            }
+            t.data = paddedData;
+            t.numChannels = 4;
+        }
+    }
 
     bool cameraSet = false;
     // Loop through all nodes, then through meshes

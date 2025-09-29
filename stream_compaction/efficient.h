@@ -29,9 +29,9 @@ namespace StreamCompaction {
 
         void scanSharedMemory(int n, int* odata, const int* idata);
 
-        int partitionOnBounces(int n, PathSegment* dev_odata, const PathSegment* dev_idata);
+        int partitionOnBounces(int n, PathSegment* dev_idata);
 
-        int partitionOnValidIntersect(int n, PathSegment* dev_odata, const PathSegment* dev_idata, int* bools);
+        int partitionOnValidIntersect(int n, PathSegment* dev_idata, int* bools);
 
     }
 }

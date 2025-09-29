@@ -264,7 +264,6 @@ __device__ void scatterRay(
             colorMapReading.y,
             colorMapReading.z);
     }
-    //color = normal;
 
     if (m.roughness == 0) {
         sampleAndResolveMetal(pathSegment, intersect, normal, m, color, rng);
@@ -284,7 +283,6 @@ __device__ void scatterRay(
     }
 
 
-    assert(fabs(glm::length(pathSegment.ray.direction) - 1.f) < 0.5f);
 
 }
 

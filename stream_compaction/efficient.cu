@@ -309,7 +309,7 @@ namespace StreamCompaction {
             }
         }
 
-        int partitionOnBounces(int n, PathSegment* dev_odata, const PathSegment* dev_idata) {
+        int partitionOnBounces(int n, PathSegment* dev_idata) {
             int blocksize = 128;
 
             int roundArraySize = n;
@@ -394,7 +394,7 @@ namespace StreamCompaction {
 //printf("Total: %i \n", total);
 //delete[] boolsHost;
 
-            cudaMemcpy(dev_odata, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(dev_idata, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
             checkCUDAError("cudaMemcpy out to odata");
 
             cudaFree(d_ping);
@@ -404,7 +404,7 @@ namespace StreamCompaction {
         }
 
 
-        int partitionOnValidIntersect(int n, PathSegment* dev_odata, const PathSegment* dev_idata, int* dev_bools, ShadeableIntersection* dev_intersections) {
+        int partitionOnValidIntersect(int n, PathSegment* dev_idata, int* dev_bools, ShadeableIntersection* dev_intersections) {
             int blocksize = 128;
 
             int roundArraySize = n;
@@ -491,7 +491,7 @@ namespace StreamCompaction {
             d_pong = temp;
 
 
-            cudaMemcpy(dev_odata, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
+            cudaMemcpy(dev_idata, d_ping, n * sizeof(PathSegment), cudaMemcpyDeviceToDevice);
             checkCUDAError("cudaMemcpy out to odata");
 
             //PathSegment* path = new PathSegment[n];

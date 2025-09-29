@@ -52,6 +52,6 @@ public:
     std::vector<Geom> geoms;
     std::vector<Material> materials;
     std::vector<Texture> textures;
-    bool hasHDRI = false;
+    int hdriIndex = -1;
     RenderState state;
 };

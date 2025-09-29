@@ -124,7 +124,6 @@ static ShadeableIntersection* dev_intersections = NULL;
 // TODO: static variables for device memory, any extra info you need, etc
 // ...
 static int* dev_isValidIntersection = NULL;
-static PathSegment* dev_pathsPong = NULL;
 static DeviceTexture* dev_textures = NULL;
 
 void InitDataContainer(GuiDataContainer* imGuiData)
@@ -207,8 +206,6 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_isValidIntersection, pixelcount * sizeof(int));
     cudaMemset(dev_isValidIntersection, 0, pixelcount * sizeof(int));
 
-    cudaMalloc(&dev_pathsPong, pixelcount * sizeof(PathSegment));
-
     // We will assemble a new textures array here to put on the GPU 
     // because I believe std::vectors cannot go onto the GPU.
     std::vector<DeviceTexture> dev_textureArr;
@@ -243,12 +240,13 @@ void pathtraceInit(Scene* scene)
         }
         else { // 32-bit float
             channelDesc = cudaCreateChannelDesc(
-                (tex.numChannels >= 1) ? 16 : 0,
-                (tex.numChannels >= 2) ? 16 : 0,
-                (tex.numChannels >= 3) ? 16 : 0,
-                (tex.numChannels >= 4) ? 16 : 0,
+                (tex.numChannels >= 1) ? 32 : 0,
+                (tex.numChannels >= 2) ? 32 : 0,
+                (tex.numChannels >= 3) ? 32 : 0,
+                (tex.numChannels >= 4) ? 32 : 0,
                 cudaChannelFormatKindFloat);
         }
+        checkCUDAError("Create Channel Desc");
 
         // 2. Allocate CUDA array
         cudaArray_t cuArray;
@@ -257,12 +255,14 @@ void pathtraceInit(Scene* scene)
         // 3. Copy host → device array
         size_t elemSize = tex.bitsPerChannel / 8;
         size_t rowSizeBytes = tex.width * tex.numChannels * elemSize;
+        checkCUDAError("Create Channel Desc2");
 
         cudaMemcpy2DToArray(
             cuArray, 0, 0,
             tex.data.data(), rowSizeBytes,
             rowSizeBytes, tex.height,
             cudaMemcpyHostToDevice);
+        checkCUDAError("Copy texture to GPU");
 
         // 4. Resource description
         cudaResourceDesc resDesc;
@@ -285,6 +285,7 @@ void pathtraceInit(Scene* scene)
         // 6. Create texture object
         cudaTextureObject_t texObj = 0;
         cudaCreateTextureObject(&texObj, &resDesc, &texDesc, nullptr);
+        checkCUDAError("Create texture handle");
 
         tex.d_data = cuArray;
         tex.d_texHandle = texObj;
@@ -377,7 +378,6 @@ void pathtraceFree(Scene* scene)
     cudaFree(dev_intersections);
     // TODO: clean up any extra device memory you created
     cudaFree(dev_isValidIntersection);
-    cudaFree(dev_pathsPong);
     cudaFree(dev_textures);
 
     checkCUDAError("pathtraceFree");
@@ -452,13 +452,15 @@ __global__ void computeIntersections(
     Geom* geoms,
     int geoms_size,
     ShadeableIntersection* intersections,
-    int* isValidIntersection)
+    int* isValidIntersection,
+    DeviceTexture* textures,
+    int hdriIndex)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
     if (path_index < num_paths)
     {
-        PathSegment pathSegment = pathSegments[path_index];
+        PathSegment& pathSegment = pathSegments[path_index];
 
         float t;
         glm::vec3 intersect_point;
@@ -524,6 +526,21 @@ __global__ void computeIntersections(
         {
             intersections[path_index].t = -1.0f;
             isValidIntersection[path_index] = 0;
+
+            //HDRI eval;
+            if (hdriIndex != -1) {
+                pathSegment.ray.direction = glm::normalize(pathSegment.ray.direction);
+                assert(fabs(glm::length(pathSegment.ray.direction) - 1.f) < 0.01f);
+
+                float theta = atan2(pathSegment.ray.direction.x, pathSegment.ray.direction.z);
+                float phi = asin(-pathSegment.ray.direction.y);
+
+                float u = theta / (2 * PI) + 0.5;
+                float v = phi / PI + 0.5;
+                float4 hdriVal = tex2D<float4>(textures[hdriIndex].texHandle, u, v);
+                pathSegment.radiance = glm::vec3(hdriVal.x, hdriVal.y, hdriVal.z);
+            }
+
         }
         else
         {
@@ -611,7 +628,7 @@ __global__ void shadeFakeMaterial(
             // This can be useful for post-processing and image compositing.
         }
         else {
-            pathSegments[idx].throughput = glm::vec3(0.0f);
+            //pathSegments[idx].throughput = glm::vec3(1.0f);
             pathSegments[idx].remainingBounces = 0;
 
         }
@@ -724,6 +741,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         }
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
             depth,
             num_paths,
@@ -731,7 +749,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_geoms,
             hst_scene->geoms.size(),
             dev_intersections,
-            dev_isValidIntersection
+            dev_isValidIntersection,
+            dev_textures,
+            hst_scene->hdriIndex
             );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
@@ -770,13 +790,9 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         //std::cout << std::endl;
 
 #if STREAMCOMPACTION
-        num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_pathsPong, dev_paths, dev_isValidIntersection, dev_intersections);
+        num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_paths, dev_isValidIntersection, dev_intersections);
         numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
         checkCUDAError("partition on intersect");
-        // switch ping pong
-        PathSegment* temp = dev_paths;
-        dev_paths = dev_pathsPong;
-        dev_pathsPong = temp;
         if (num_paths == 0) break;
 #endif
 
@@ -827,13 +843,10 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         checkCUDAError("shading");
 
 #if STREAMCOMPACTION
-        num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_pathsPong, dev_paths);
+        num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_paths);
         numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
         checkCUDAError("partition on bounces");
-        // switch ping pong
-        temp = dev_paths;
-        dev_paths = dev_pathsPong;
-        dev_pathsPong = temp;
+
 #endif
 
 
@@ -859,7 +872,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // Assemble this iteration and apply it to the image
     dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-    finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths_total, dev_image, dev_paths);
+    finalGather<<<numBlocksPixels, blockSize1d>>>(pixelcount, dev_image, dev_paths);
 
     ///////////////////////////////////////////////////////////////////////////
 
