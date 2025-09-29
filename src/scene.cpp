@@ -274,6 +274,24 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         textures.push_back(newTex);
     }
 
+    // READ HDRI
+    int x = 0, y = 0, channels = 0;
+    float* hdriData = stbi_loadf("./scenes/passendorf_snow_2k.hdr", &x, &y, &channels, 0);
+
+    if (x > 0 && y > 0) {
+        Texture hdri;
+        hdri.width = x;
+        hdri.height = y;
+        hdri.bitsPerChannel = 32; // via stbi_loadf
+        hdri.numChannels = channels;
+
+        int num_bytes = x * y * channels * sizeof(float);
+        hdri.data.resize(num_bytes);
+        memcpy(hdri.data.data(), hdriData, num_bytes);
+        textures.push_back(hdri);
+        hasHDRI = true;
+    }
+
 
     bool cameraSet = false;
     // Loop through all nodes, then through meshes

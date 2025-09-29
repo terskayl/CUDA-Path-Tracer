@@ -140,7 +140,7 @@ struct Material
     */
 };
 
-struct Texture { // DOESN"T WORK< NEEDS TO BE ON THE MAIN THREAD OR SMTG.
+struct Texture {
     cudaTextureObject_t d_texHandle = 0;
     cudaArray_t d_data = nullptr;
     std::vector<uint8_t> data;

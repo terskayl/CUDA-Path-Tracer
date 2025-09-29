@@ -131,7 +131,7 @@ __host__ __device__ float calculateFrenelDielectric(
     PathSegment& pathSegment,
     glm::vec3 normal) {
 
-    glm::vec3 w_i = pathSegment.ray.direction; // CHECK: negate?
+    glm::vec3 w_i = pathSegment.ray.direction;
     float cosTheta_i = dot(w_i, normal);
 
     float etaI = 1.;
@@ -183,6 +183,49 @@ __host__ __device__ void sampleAndResolveGlass(
 }
 
 
+__host__ __device__ glm::vec3 calculateFresnelConductor(
+    PathSegment& pathSegment,
+    glm::vec3 normal) {
+
+    glm::vec3 w_i = pathSegment.ray.direction;
+    float cosTheta_i = dot(w_i, normal);
+    // We will hard-code the indices of refraction to be
+    // those of GOLD https://cseweb.ucsd.edu/classes/sp17/cse168-a/CSE168_03_Fresnel.pdf
+    //float eta = 0.37;
+    //float k = 2.82;
+    // Eta and k values for r,g,b, at 630nm, 532nm, and 465nm.
+    // from https://refractiveindex.info/?shelf=main&book=Au&page=Johnson
+    glm::vec3 eta = glm::vec3(0.188, 0.543, 1.332);
+    glm::vec3 k = glm::vec3(3.403, 2.231, 1.869);
+    cosTheta_i = glm::clamp(cosTheta_i, -1.f, 1.f);
+    if (cosTheta_i < 0) {
+        cosTheta_i = abs(cosTheta_i);
+    }
+
+    // Implementation from https://cseweb.ucsd.edu/classes/sp17/cse168-a/CSE168_03_Fresnel.pdf slide 25
+    glm::vec3 etaK2 = eta * eta * k * k;
+    glm::vec3 Rparl = ((etaK2 * cosTheta_i * cosTheta_i) - 2.f * (eta * cosTheta_i) + glm::vec3(1.)) /
+        ((etaK2 * cosTheta_i * cosTheta_i) + 2.f * (eta * cosTheta_i) + glm::vec3(1.));
+    glm::vec3 Rperp = ((etaK2)+glm::vec3(cosTheta_i * cosTheta_i) - 2.f * (eta * cosTheta_i)) /
+        ((etaK2)+glm::vec3(cosTheta_i * cosTheta_i) + 2.f * (eta * cosTheta_i));
+    return glm::vec3((Rparl * Rparl + Rperp * Rperp) / 2.f);
+}
+
+__host__ __device__ void sampleAndResolveMetal(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    glm::vec3 color,
+    thrust::default_random_engine& rng) {
+
+    glm::vec3 fresnel = calculateFresnelConductor(pathSegment, normal);
+    
+    sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
+    // Double because there is no chance of transmission
+    pathSegment.throughput *= 2.f * fresnel;
+}
+
 // Scatter ray cannot be called on the host as it samples textures.
 __device__ void scatterRay(
     PathSegment& pathSegment,
@@ -224,7 +267,7 @@ __device__ void scatterRay(
     //color = normal;
 
     if (m.roughness == 0) {
-        sampleAndResolveGlass(pathSegment, intersect, normal, m, color, rng);
+        sampleAndResolveMetal(pathSegment, intersect, normal, m, color, rng);
         //float fresnel = calculateFrenelDielectric(pathSegment, normal);
         //pathSegment.radiance = fresnel * glm::vec3(1, 0, 0) + (1 - fresnel) * glm::vec3(0, 0, 1);
         //if (fresnel > 0.01f && fresnel < 0.1f) {

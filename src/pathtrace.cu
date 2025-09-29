@@ -28,9 +28,10 @@
 #define STREAMCOMPACTION 1
 #define MATERIALSORTING 1
 #define BVH 1;
-#define REINHARD 1;
+#define ACES 1;
+#define REINHARD 0;
 #define GAMMACORRECTION 1;
-
+#define RUSSIANROULETTE 1;
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
@@ -75,29 +76,35 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 
         glm::ivec3 color;
         glm::vec3 postReinhard;
-#if REINHARD
-        // Reinhard Operator
+
         pix.x /= iter;
         pix.y /= iter;
         pix.z /= iter;
-        postReinhard.x = pix.x / (pix.x + 1);
-        postReinhard.y = pix.y / (pix.y + 1);
-        postReinhard.z = pix.z / (pix.z + 1);
-#if GAMMACORRECTION
-        postReinhard.x = glm::pow(postReinhard.x, 1.0/2.2);
-        postReinhard.y = glm::pow(postReinhard.y, 1.0/2.2);
-        postReinhard.z = glm::pow(postReinhard.z, 1.0/2.2);
-#endif 
-        color.x = (int)(postReinhard.x * 255.0);
-        color.y = (int)(postReinhard.y * 255.0);
-        color.z = (int)(postReinhard.z * 255.0);
-#else
-        color.x = glm::clamp((int)(pix.x / iter * 255.0), 0, 255);
-        color.y = glm::clamp((int)(pix.y / iter * 255.0), 0, 255);
-        color.z = glm::clamp((int)(pix.z / iter * 255.0), 0, 255);
+
+#if REINHARD
+        // Reinhard Operator
+        pix.x = pix.x / (pix.x + 1);
+        pix.y = pix.y / (pix.y + 1);
+        pix.z = pix.z / (pix.z + 1);
 #endif
 
+#if ACES
+        float a = 2.51f;
+        float b = 0.03f;
+        float c = 2.43f;
+        float d = 0.59f;
+        float e = 0.14f;
+        pix = (pix * (a * pix + b)) / (pix * (c * pix + d) + e);
+#endif
 
+#if GAMMACORRECTION
+        pix.x = glm::pow(pix.x, 1.0 / 2.2);
+        pix.y = glm::pow(pix.y, 1.0 / 2.2);
+        pix.z = glm::pow(pix.z, 1.0 / 2.2);
+#endif 
+        color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
+        color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
+        color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);;
 
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
@@ -212,8 +219,8 @@ void pathtraceInit(Scene* scene)
         if (tex.numChannels < 1 || tex.numChannels > 4) {
             throw std::runtime_error("Unsupported channel count");
         }
-        if (tex.bitsPerChannel != 8 && tex.bitsPerChannel != 16) {
-            throw std::runtime_error("Unsupported bit depth (only 8 or 16)");
+        if (tex.bitsPerChannel != 8 && tex.bitsPerChannel != 16 && tex.bitsPerChannel != 32) {
+            throw std::runtime_error("Unsupported bit depth (only 8, 16 or 32)");
         }
 
         // 1. Create channel descriptor
@@ -226,13 +233,21 @@ void pathtraceInit(Scene* scene)
                 (tex.numChannels >= 4) ? 8 : 0,
                 cudaChannelFormatKindUnsigned);
         }
-        else { // 16-bit
+        else if (tex.bitsPerChannel == 16) {
             channelDesc = cudaCreateChannelDesc(
                 (tex.numChannels >= 1) ? 16 : 0,
                 (tex.numChannels >= 2) ? 16 : 0,
                 (tex.numChannels >= 3) ? 16 : 0,
                 (tex.numChannels >= 4) ? 16 : 0,
                 cudaChannelFormatKindUnsigned);
+        }
+        else { // 32-bit float
+            channelDesc = cudaCreateChannelDesc(
+                (tex.numChannels >= 1) ? 16 : 0,
+                (tex.numChannels >= 2) ? 16 : 0,
+                (tex.numChannels >= 3) ? 16 : 0,
+                (tex.numChannels >= 4) ? 16 : 0,
+                cudaChannelFormatKindFloat);
         }
 
         // 2. Allocate CUDA array
@@ -262,6 +277,9 @@ void pathtraceInit(Scene* scene)
         texDesc.addressMode[1] = cudaAddressModeClamp;
         texDesc.filterMode = cudaFilterModePoint;
         texDesc.readMode = cudaReadModeNormalizedFloat;
+        if (tex.bitsPerChannel == 32) {
+            texDesc.readMode = cudaReadModeElementType; // If float type, do not normalize
+        }
         texDesc.normalizedCoords = 1;             
 
         // 6. Create texture object
@@ -386,7 +404,6 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.radiance = glm::vec3(0.0f, 0.0f, 0.0f);
         segment.throughput = glm::vec3(1.0f, 1.0f, 1.0f);
 
-        // TODO: implement antialiasing by jittering the ray
 
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, traceDepth);
         thrust::uniform_real_distribution<float> u01(0, 1);
@@ -396,6 +413,26 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
             + cam.right * cam.pixelLength.x * (u01(rng) - 0.5f)
             + cam.up * cam.pixelLength.y * (u01(rng) - 0.5f)
         );
+
+        // DOF implementation
+        //TODO: attach to ui
+        float focal_distance = 2.f;
+        glm::vec3 target = cam.view
+            - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
+            - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
+            + cam.right * cam.pixelLength.x * (u01(rng) - 0.5f)
+            + cam.up * cam.pixelLength.y * (u01(rng) - 0.5f);
+        target *= focal_distance;
+
+        //TODO: attach to ui
+        float dofScale = 0.0f;
+        glm::vec3 posOffset = dofScale * cam.right * (u01(rng) - 0.5f)
+            + dofScale * cam.up * (u01(rng) - 0.5f);
+        
+        segment.ray.origin = cam.position + posOffset;
+        segment.ray.direction = glm::normalize(target - posOffset);
+
+
         assert(fabs(glm::length(segment.ray.direction)) - 1 < 0.01);
 
 
@@ -556,6 +593,17 @@ __global__ void shadeFakeMaterial(
                 scatterRay(pathSegments[idx], pathSegments[idx].ray.direction * intersection.t + pathSegments[idx].ray.origin,
                     intersection.surfaceNormal, material, textures, intersection.uvCoord, intersection.surfaceTangent,
                     intersection.surfaceBitangent, rng);
+#if RUSSIANROULETTE
+                // Russian Roulette
+                float probDie = glm::clamp(glm::length(pathSegments[idx].throughput), 0.05f, 0.95f);
+                if (u01(rng) > probDie) {
+                    pathSegments[idx].remainingBounces = 0;
+                }
+                else {
+                    pathSegments[idx].throughput /= probDie;
+                }
+#endif
+
             }
             // If there was no intersection, color the ray black.
             // Lots of renderers use 4 channel color, RGBA, where A = alpha, often
