@@ -71,7 +71,12 @@ __host__ __device__ void sampleAndResolveSpecularRefl(
     glm::vec3 color,
     thrust::default_random_engine& rng) {
 
-    const float epsilon = 1e-3;
+    float epsilon = 1e-3;
+    // Needs some extra help when normal mapping is on
+    if (m.normalTexture != -1) {
+        epsilon = 1e-2;
+    }
+
     bool isEntering = dot(normal, pathSegment.ray.direction) < 0;
     if (isEntering) {
         pathSegment.ray.origin = intersect + epsilon * normal;
@@ -102,7 +107,12 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     float etaB = 1.4f;// m.ior;
     float eta;
 
-    const float epsilon = 1e-3;
+    float epsilon = 1e-3;
+    // Needs some extra help when normal mapping is on
+    if (m.normalTexture != -1) {
+        epsilon = 1e-2;
+    }
+
     if (isEntering) {
         pathSegment.ray.origin = intersect + epsilon * -normal;
         eta = etaA / etaB;
@@ -124,6 +134,76 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
 
     pathSegment.ray.direction = reflectedDir;
     pathSegment.throughput *= m.baseColor;
+    return;
+}
+
+__host__ __device__ void sampleAndResolveSpecularTransSpectrum(
+    PathSegment& pathSegment,
+    glm::vec3 intersect,
+    glm::vec3 normal,
+    const Material& m,
+    glm::vec3 color,
+    thrust::default_random_engine& rng) {
+
+    glm::vec3 w_i = pathSegment.ray.direction;
+    bool isEntering = (dot(normal, w_i) < 0);
+
+    glm::vec3 etaA = glm::vec3(1., 1.02, 1.04);
+    glm::vec3 etaB = glm::vec3(1.4f, 1.45f, 1.5f);// glm::vec3(m.ior, m.ior + 0.05, m.ior + 0.1);
+    float eta;
+
+    float epsilon = 1e-3;
+    // Needs some extra help when normal mapping is on
+    if (m.normalTexture != -1) {
+        epsilon = 1e-2;
+    }
+
+    thrust::uniform_real_distribution<float> u01(0, 1);
+    float seed = u01(rng);
+
+    float etaI, etaT;
+    if (seed < 0.33) {
+        etaI = etaA.x;
+        etaT = etaB.x;
+    }
+    else if (seed < 0.67) {
+        etaI = etaA.y;
+        etaT = etaB.y;
+    }
+    else {
+        etaI = etaA.z;
+        etaT = etaB.z;
+    }
+
+    if (isEntering) {
+        pathSegment.ray.origin = intersect + epsilon * -normal;
+        eta = etaI / etaT;
+    }
+    else {
+        pathSegment.ray.origin = intersect + epsilon * normal;
+        eta = etaT / etaI;
+        normal = -normal;
+    }
+
+    glm::vec3 reflectedDir = glm::refract(w_i, normal, eta);
+    // check for total internal rr
+    if (isnan(reflectedDir.x) ||
+        isnan(reflectedDir.y) ||
+        isnan(reflectedDir.z)) {
+        pathSegment.remainingBounces = 0;
+        return;
+    }
+
+    pathSegment.ray.direction = reflectedDir;
+    if (seed < 0.33) {
+        pathSegment.throughput *= glm::vec3(3 * m.baseColor.r, 0, 0);
+    }
+    else if (seed < 0.67) {
+        pathSegment.throughput *= glm::vec3(0, 3 * m.baseColor.g, 0);
+    }
+    else {
+        pathSegment.throughput *= glm::vec3(0, 0, 3 * m.baseColor.b);
+    }
     return;
 }
 
@@ -264,8 +344,20 @@ __device__ void scatterRay(
             colorMapReading.y,
             colorMapReading.z);
     }
+    glm::vec3 aoRoughMetal = glm::vec3(0.0, m.roughness, m.metallic);
+    if(m.metallicRoughnessTexture != -1) {
+        cudaTextureObject_t aoRoughMetalTexture = texArr[m.metallicRoughnessTexture].texHandle;
 
-    if (m.roughness == 0) {
+        float4 aoRoughMetalMapReading = tex2D<float4>(aoRoughMetalTexture, uv.x, uv.y);
+        aoRoughMetal = glm::vec3(
+            aoRoughMetalMapReading.x,
+            aoRoughMetalMapReading.y,
+            aoRoughMetalMapReading.z);
+
+    }
+
+    if (aoRoughMetal.b >= 0.9) {
+        pathSegment.ray.origin = intersect + epsilon * normal;
         sampleAndResolveMetal(pathSegment, intersect, normal, m, color, rng);
         //float fresnel = calculateFrenelDielectric(pathSegment, normal);
         //pathSegment.radiance = fresnel * glm::vec3(1, 0, 0) + (1 - fresnel) * glm::vec3(0, 0, 1);
@@ -277,9 +369,27 @@ __device__ void scatterRay(
         //pathSegment.remainingBounces = 0;
         //sampleAndResolveSpecularTrans(pathSegment, intersect, normal, m, color, rng);
     }
-    else{
+    else if (m.transmission > 0) {
+        sampleAndResolveGlass(pathSegment, intersect, normal, m, color, rng);
+    }
+    else if (aoRoughMetal.g < 0.99) {
+        sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
+    }
+    else if (aoRoughMetal.g > 0.99) {
         pathSegment.ray.origin = intersect + epsilon * normal;
         sampleAndResolveDiffuse(pathSegment, intersect, normal, m, color, rng);
+    }
+    else {
+        pathSegment.ray.origin = intersect + epsilon * normal;
+        thrust::uniform_real_distribution<float> u01(0, 1);
+
+        if (u01(rng) < aoRoughMetal.g) {
+            sampleAndResolveDiffuse(pathSegment, intersect, normal, m, color, rng);
+        }
+        else {
+            sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
+        }
+
     }
 
 
