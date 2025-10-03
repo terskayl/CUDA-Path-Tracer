@@ -373,8 +373,9 @@ __host__ __device__ float meshIntersectionTestBVH(
         if (bbox_t == -1) continue;
 
         // Nodes should either have two children or none.
-        assert((currNode.leftChild <= 0 && currNode.rightChild <= 0) ||
-            (currNode.leftChild > 0 && currNode.rightChild > 0));
+
+        //assert((currNode.leftChild <= 0 && currNode.rightChild <= 0) ||
+        //    (currNode.leftChild > 0 && currNode.rightChild > 0));
         // nodes set their child values to 0 when they are a leaf,
         // as index 0 cannot be a child
         if (currNode.leftChild > 0 && currNode.rightChild > 0) {

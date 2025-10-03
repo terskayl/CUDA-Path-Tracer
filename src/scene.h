@@ -48,6 +48,7 @@ private:
     void formatBVH(const std::unique_ptr<CpuBvhNode>& root, Mesh& mesh);
 public:
     Scene(std::string filename);
+    Scene(std::string filename, std::string imageName, std::string renderStateJson);
 
     std::vector<Geom> geoms;
     std::vector<Material> materials;

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cuda.h>
 #include <cmath>
+#include <iostream>
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/device_vector.h>
@@ -10,15 +11,16 @@
 #include <thrust/sort.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/tuple.h>
+#include "glm/glm.hpp"
+#include "glm/gtx/norm.hpp"
+#include <stream_compaction/efficient.cu>
+#include <OpenImageDenoise/oidn.hpp>
 
 #include "sceneStructs.h"
 #include "scene.h"
-#include "glm/glm.hpp"
-#include "glm/gtx/norm.hpp"
 #include "utilities.h"
 #include "intersections.h"
 #include "interactions.h"
-#include <stream_compaction/efficient.cu>
 
 #define ERRORCHECK 1
 
@@ -32,6 +34,7 @@
 #define REINHARD 0;
 #define GAMMACORRECTION 1;
 #define RUSSIANROULETTE 1;
+#define OIDN 0;
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
@@ -117,6 +120,9 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
 static Scene* hst_scene = NULL;
 static GuiDataContainer* guiData = NULL;
 static glm::vec3* dev_image = NULL;
+static glm::vec3* dev_image_albedo = NULL;
+static glm::vec3* dev_image_normal = NULL;
+static glm::vec3* dev_image_denoised = NULL;
 static Geom* dev_geoms = NULL;
 static Material* dev_materials = NULL;
 static PathSegment* dev_paths = NULL;
@@ -141,35 +147,60 @@ void pathtraceInit(Scene* scene)
     cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
+    // Checkpointed image copy
+    printf("Init called with iter: %ui", hst_scene->state.currIteration);
+    if (hst_scene->state.currIteration != 0) {
+        cudaMemcpy(dev_image, hst_scene->state.image.data(),
+            pixelcount * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+    }
+
+    cudaMalloc(&dev_image_albedo, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_image_albedo, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_image_normal, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_image_normal, 0, pixelcount * sizeof(glm::vec3));
+
+    cudaMalloc(&dev_image_denoised, pixelcount * sizeof(glm::vec3));
+    cudaMemset(dev_image_denoised, 0, pixelcount * sizeof(glm::vec3));
+
     cudaMalloc(&dev_paths, pixelcount * sizeof(PathSegment));
 
     printf("INITING");
 
     // Copy all mesh data onto the GPU
+    checkCUDAError("other");
     for (Geom& geom : scene->geoms) {
         if (geom.type == MESH && !geom.mesh.onGpu) {
             Mesh& mesh = geom.mesh;
 
+            checkCUDAError("other");
             glm::vec3 *posTmp, *norTmp;
             glm::vec2* uvTmp;
             unsigned short* indTmp, *indBvhTmp;
             BvhNode* nodesTmp;
 
+            checkCUDAError("other");
             cudaMalloc((void**)&posTmp, mesh.posCount * sizeof(glm::vec3));
             cudaMemcpy(posTmp, mesh.pos, mesh.posCount * sizeof(glm::vec3), cudaMemcpyHostToDevice);
             free(mesh.pos);
             mesh.pos = posTmp;
 
+            checkCUDAError("other");
             cudaMalloc((void**)&norTmp, mesh.norCount * sizeof(glm::vec3));
             cudaMemcpy(norTmp, mesh.nor, mesh.norCount * sizeof(glm::vec3), cudaMemcpyHostToDevice);
             free(mesh.nor);
             mesh.nor = norTmp;
 
+
+            size_t size = mesh.uvCount * sizeof(float3);
+            std::cout << "Allocating " << size << " bytes (" << (size / (1024.0 * 1024.0)) << " MB)\n";
+            checkCUDAError("other");
             cudaMalloc((void**)&uvTmp, mesh.uvCount * sizeof(glm::vec2));
             cudaMemcpy(uvTmp, mesh.uv, mesh.uvCount * sizeof(glm::vec2), cudaMemcpyHostToDevice);
             free(mesh.uv);
             mesh.uv = uvTmp;
 
+            checkCUDAError("other");
             cudaMalloc((void**)&indTmp, mesh.indCount * sizeof(unsigned short));
             cudaMemcpy(indTmp, mesh.ind, mesh.indCount * sizeof(unsigned short), cudaMemcpyHostToDevice);
             free(mesh.ind);
@@ -203,6 +234,7 @@ void pathtraceInit(Scene* scene)
     cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
+    checkCUDAError("other");
     cudaMalloc(&dev_isValidIntersection, pixelcount * sizeof(int));
     cudaMemset(dev_isValidIntersection, 0, pixelcount * sizeof(int));
 
@@ -221,6 +253,7 @@ void pathtraceInit(Scene* scene)
         }
 
         // 1. Create channel descriptor
+        checkCUDAError("other");
         cudaChannelFormatDesc channelDesc;
         if (tex.bitsPerChannel == 8) {
             channelDesc = cudaCreateChannelDesc(
@@ -306,6 +339,9 @@ void pathtraceInit(Scene* scene)
 void pathtraceFree(Scene* scene)
 {
     cudaFree(dev_image);  // no-op if dev_image is null
+    cudaFree(dev_image_albedo);
+    cudaFree(dev_image_normal);
+    cudaFree(dev_image_denoised);
     cudaFree(dev_paths);
     checkCUDAError("pathtraceFree1");
 
@@ -403,6 +439,8 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         segment.ray.origin = cam.position;
         segment.radiance = glm::vec3(0.0f, 0.0f, 0.0f);
         segment.throughput = glm::vec3(1.0f, 1.0f, 1.0f);
+        segment.firstAlbedo = glm::vec3(-1.f);
+        segment.firstNormal = glm::vec3(-1.f);
 
 
         thrust::default_random_engine rng = makeSeededRandomEngine(iter, index, traceDepth);
@@ -636,7 +674,7 @@ __global__ void shadeFakeMaterial(
 }
 
 // Add the current iteration's output to the overall image
-__global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iterationPaths)
+__global__ void finalGather(int nPaths, glm::vec3* image, glm::vec3* image_albedo, glm::vec3* image_normal, PathSegment* iterationPaths)
 {
     int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -644,6 +682,10 @@ __global__ void finalGather(int nPaths, glm::vec3* image, PathSegment* iteration
     {
         PathSegment iterationPath = iterationPaths[index];
         image[iterationPath.pixelIndex] += iterationPath.throughput * iterationPath.radiance;
+#if OIDN
+        image_albedo[iterationPath.pixelIndex] = iterationPath.firstAlbedo;
+        image_normal[iterationPath.pixelIndex] = iterationPath.firstNormal;
+#endif 
     }
 }
 
@@ -734,7 +776,6 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         checkCUDAError("cudaMemset");
 
         for (Geom geom : hst_scene->geoms) {
-            printf("TYPE IS: %i\n", static_cast<int>(geom.type));
             if (geom.type == MESH) {
                 assert(geom.mesh.onGpu);
             }
@@ -872,13 +913,50 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // Assemble this iteration and apply it to the image
     dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-    finalGather<<<numBlocksPixels, blockSize1d>>>(pixelcount, dev_image, dev_paths);
+    finalGather<<<numBlocksPixels, blockSize1d>>>(pixelcount, dev_image, dev_image_albedo, dev_image_normal, dev_paths);
+
+# if OIDN
+    // denoise with OIDN
+    oidn::DeviceRef device = oidn::newCUDADevice(0, NULL);
+    device.commit();
+
+    // Setup buffers
+    oidn::BufferRef colorBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+    oidn::BufferRef albedoBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+    oidn::BufferRef normalBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+    oidn::BufferRef outputBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+
+    cudaMemcpy(colorBuf.getData(), dev_image, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(albedoBuf.getData(), dev_image_albedo, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+    cudaMemcpy(normalBuf.getData(), dev_image_normal, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+
+    oidn::FilterRef filter = device.newFilter("RT"); // ray tracing filter
+    filter.setImage("color", colorBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+    filter.setImage("albedo", albedoBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+    filter.setImage("normal", normalBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+    filter.setImage("output", outputBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+    filter.set("hdr", true);
+    filter.commit();
+
+    filter.execute();
+
+    const char* errorMessage;
+    if (device.getError(errorMessage) != oidn::Error::None) {
+        printf("Error: ");
+        printf(errorMessage);
+    }
+
+    cudaMemcpy(dev_image_denoised, outputBuf.getData(), pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+#endif
 
     ///////////////////////////////////////////////////////////////////////////
 
     // Send results to OpenGL buffer for rendering
+#if OIDN
+    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image_denoised);
+#else
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);
-
+#endif
     // Retrieve image from GPU
     cudaMemcpy(hst_scene->state.image.data(), dev_image,
         pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);

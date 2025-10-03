@@ -259,6 +259,8 @@ namespace StreamCompaction {
                 odata[falseIndices[idx]].remainingBounces = idata[idx].remainingBounces;
                 odata[falseIndices[idx]].radiance = idata[idx].radiance;
                 odata[falseIndices[idx]].throughput = idata[idx].throughput;
+                odata[falseIndices[idx]].firstAlbedo = idata[idx].firstAlbedo;
+                odata[falseIndices[idx]].firstNormal = idata[idx].firstNormal;
             }
             else {
                 odata[idx - falseIndices[idx] + total].pixelIndex = idata[idx].pixelIndex;
@@ -267,6 +269,8 @@ namespace StreamCompaction {
                 odata[idx - falseIndices[idx] + total].remainingBounces = idata[idx].remainingBounces;
                 odata[idx - falseIndices[idx] + total].radiance = idata[idx].radiance;
                 odata[idx - falseIndices[idx] + total].throughput = idata[idx].throughput;
+                odata[idx - falseIndices[idx] + total].firstAlbedo = idata[idx].firstAlbedo;
+                odata[idx - falseIndices[idx] + total].firstNormal = idata[idx].firstNormal;
             }
         }
 
@@ -282,6 +286,8 @@ namespace StreamCompaction {
                 odata[falseIndices[idx]].remainingBounces = idata[idx].remainingBounces;
                 odata[falseIndices[idx]].radiance = idata[idx].radiance;
                 odata[falseIndices[idx]].throughput = idata[idx].throughput;
+                odata[falseIndices[idx]].firstAlbedo = idata[idx].firstAlbedo;
+                odata[falseIndices[idx]].firstNormal = idata[idx].firstNormal;
 
                 oIntersects[falseIndices[idx]].materialId = iIntersects[idx].materialId;
                 oIntersects[falseIndices[idx]].t = iIntersects[idx].t;
@@ -298,6 +304,8 @@ namespace StreamCompaction {
                 odata[idx - falseIndices[idx] + total].remainingBounces = idata[idx].remainingBounces;
                 odata[idx - falseIndices[idx] + total].radiance = idata[idx].radiance;
                 odata[idx - falseIndices[idx] + total].throughput = idata[idx].throughput;
+                odata[idx - falseIndices[idx] + total].firstAlbedo = idata[idx].firstAlbedo;
+                odata[idx - falseIndices[idx] + total].firstNormal = idata[idx].firstNormal;
 
                 oIntersects[idx - falseIndices[idx] + total].materialId = iIntersects[idx].materialId;
                 oIntersects[idx - falseIndices[idx] + total].t = iIntersects[idx].t;

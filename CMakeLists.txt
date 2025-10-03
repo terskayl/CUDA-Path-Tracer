@@ -126,3 +126,14 @@ cis565_path_tracer PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/stream_compaction)
 
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT ${CMAKE_PROJECT_NAME})
 
+include_directories(${CMAKE_SOURCE_DIR}/third_party/oidn/include)
+target_link_libraries(${CMAKE_PROJECT_NAME}
+    "${CMAKE_SOURCE_DIR}/third_party/oidn/lib/OpenImageDenoise.lib")
+file(GLOB OIDN_DLLS "${CMAKE_SOURCE_DIR}/third_party/oidn/bin/*.dll")
+foreach(DLL ${OIDN_DLLS})
+    add_custom_command(TARGET ${CMAKE_PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${DLL}"
+            "$<TARGET_FILE_DIR:${CMAKE_PROJECT_NAME}>"
+    )
+endforeach()

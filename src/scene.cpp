@@ -49,6 +49,133 @@ Scene::Scene(string filename)
     }
 }
 
+inline void from_json(const json& j, Camera& c) {
+    auto res = j.at("resolution");
+    c.resolution.x = res.at(0).get<int>();
+    c.resolution.y = res.at(1).get<int>();
+
+    auto pos = j.at("position");
+    c.position.x = pos.at(0).get<float>();
+    c.position.y = pos.at(1).get<float>();
+    c.position.z = pos.at(2).get<float>();
+
+    auto lookAt = j.at("lookAt");
+    c.lookAt.x = lookAt.at(0).get<float>();
+    c.lookAt.y = lookAt.at(1).get<float>();
+    c.lookAt.z = lookAt.at(2).get<float>();
+
+    auto view = j.at("view");
+    c.view.x = view.at(0).get<float>();
+    c.view.y = view.at(1).get<float>();
+    c.view.z = view.at(2).get<float>();
+
+    auto up = j.at("up");
+    c.up.x = up.at(0).get<float>();
+    c.up.y = up.at(1).get<float>();
+    c.up.z = up.at(2).get<float>();
+
+    auto right = j.at("right");
+    c.right.x = right.at(0).get<float>();
+    c.right.y = right.at(1).get<float>();
+    c.right.z = right.at(2).get<float>();
+
+    auto fov = j.at("fov");
+    c.fov.x = fov.at(0).get<float>();
+    c.fov.y = fov.at(1).get<float>();
+
+    auto pixelLength = j.at("pixelLength");
+    c.pixelLength.x = pixelLength.at(0).get<float>();
+    c.pixelLength.y = pixelLength.at(1).get<float>();
+}
+
+inline void from_json(const json& j, RenderState& r) {
+    j.at("camera").get_to(r.camera);
+    j.at("iterations").get_to(r.iterations);
+    j.at("currIteration").get_to(r.currIteration);
+    j.at("traceDepth").get_to(r.traceDepth);
+    j.at("imageName").get_to(r.imageName);
+}
+
+Scene::Scene(string filename, string imageName, string renderStateJson)
+{
+    cout << "Reading scene from " << filename << " ..." << endl;
+    cout << " " << endl;
+    auto ext = filename.substr(filename.find_last_of('.'));
+    if (ext == ".json")
+    {
+        loadFromJSON(filename);
+        return;
+    }
+    else if (ext == ".gltf" || ext == ".glb")
+    {
+        bool success = loadFromGLTF(filename, ext == ".glb");
+        if (!success) {
+            cout << "Error reading gltf file " << filename << endl;
+            exit(-1);
+        }
+    }
+    else
+    {
+        cout << "Couldn't read from " << filename << endl;
+        exit(-1);
+    }
+
+    cout << "Reading renderState from " << renderStateJson << " ..." << endl;
+    cout << " " << endl;
+    ext = renderStateJson.substr(renderStateJson.find_last_of('.'));
+    if (ext == ".json")
+    {
+        std::ifstream file(renderStateJson);
+        if (!file) {
+            cout << "Couldn't read from " << renderStateJson << endl;
+            exit(-1);
+        }
+
+        json j;
+        file >> j;
+
+        state = j.get<RenderState>();
+
+    }
+    else
+    {
+        cout << "Couldn't read from " << renderStateJson << endl;
+        exit(-1);
+    }
+
+    cout << "Reading image from " << imageName << " ..." << endl;
+    cout << " " << endl;
+    int x = 0, y = 0, channels = 0;
+    float* savedImage = stbi_loadf(imageName.c_str(), &x, &y, &channels, 3); // Force load 3 channels
+    if (x <= 0 || y <= 0) {
+        const char* reason = stbi_failure_reason();
+        if (reason) {
+            std::cerr << "Image load failure with reason: " << reason << std::endl;
+            exit(-1);
+        }
+    }
+    state.image.resize(state.camera.resolution.x * state.camera.resolution.y);
+    memcpy(state.image.data(), savedImage, state.camera.resolution.x * state.camera.resolution.y * 3 * sizeof(float));
+    // weigh image by the number of current iterations
+    for (glm::vec3& pixel : state.image) {
+        pixel *= state.currIteration;
+    }
+    // Flip image because stbi horizontally flipped it?
+    int width = state.camera.resolution.x;
+    int halfWidth = state.camera.resolution.x / 2;
+
+    for (int y = 0; y < state.camera.resolution.y; y++) {
+        for (int x = 0; x < halfWidth; x++) {
+            std::swap(
+                state.image[y * width + x],
+                state.image[y * width + (width - 1 - x)]
+            );
+        }
+    }
+
+    stbi_image_free(savedImage);
+}
+
 void Scene::loadFromJSON(const std::string& jsonName)
 {
     std::ifstream f(jsonName);
@@ -222,7 +349,6 @@ static void createDefaultCamera(RenderState& state) {
         2 * yscaled / (float)camera.resolution.y);
 }
 
-
 static inline glm::vec3 doubleArrayToVec3(std::vector<double> arr) {
     return glm::vec3(arr[0], arr[1], arr[2]);
 }
@@ -329,6 +455,13 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     // TODO : Connect to UI
     int x = 0, y = 0, channels = 0;
     float* hdriData = stbi_loadf("C:/Users/njbhv/Documents/Code/CIS5650/Project3-CUDA-Path-Tracer/scenes/passendorf_snow_1k.hdr", &x, &y, &channels, 0);
+    if (x == 0 || y == 0) {
+
+    }
+    const char* reason = stbi_failure_reason();
+    if (reason) {
+        std::cerr << "Failure reason: " << reason << std::endl;
+    }
 
     if (x > 0 && y > 0) {
         Texture hdri;
@@ -423,6 +556,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                     int accessorId = prim.attributes["POSITION"];
                     tinygltf::Accessor accessor = model.accessors[accessorId];
                     int bufferViewId = accessor.bufferView;
+                    if (accessor.componentType != 5126) { // Unsupported data type, skipping mesh.
+                        continue;
+                    }
                     assert(accessor.componentType == 5126); // GLTF encoding for float
                     assert(accessor.type == 3); // GLTF encoding for vec3
                     size_t count = accessor.count;
@@ -443,6 +579,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                     int accessorId = prim.attributes["NORMAL"];
                     tinygltf::Accessor accessor = model.accessors[accessorId];
                     int bufferViewId = accessor.bufferView;
+                    if (accessor.componentType != 5126) { // Unsupported data type, skipping mesh.
+                        continue;
+                    }
                     assert(accessor.componentType == 5126); // GLTF encoding for float
                     assert(accessor.type == 3); // GLTF encoding for vec3
                     size_t count = accessor.count;
@@ -464,6 +603,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                     int accessorId = prim.attributes["TEXCOORD_0"];
                     tinygltf::Accessor accessor = model.accessors[accessorId];
                     int bufferViewId = accessor.bufferView;
+                    if (accessor.componentType != 5126) { // Unsupported data type, skipping mesh.
+                        continue;
+                    }
                     assert(accessor.componentType == 5126); // GLTF encoding for float
                     assert(accessor.type == 2); // GLTF encoding for vec2
                     size_t count = accessor.count;
@@ -487,6 +629,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                     int accessorId = prim.indices;
                     tinygltf::Accessor accessor = model.accessors[accessorId];
                     int bufferViewId = accessor.bufferView;
+                    if (accessor.componentType != 5123) { // Unsupported data type, skipping mesh.
+                        continue;
+                    }
                     assert(accessor.componentType == 5123); // GLTF encoding for unsigned_short
                     assert(accessor.type == 65); // GLTF encoding for scalar
                     size_t count = accessor.count;
@@ -671,7 +816,7 @@ void Scene::buildBVH(Mesh& mesh) {
     printf("    [ ");
     for (int i = 0; i < mesh.numBvhNodes; i++) {
         if (abridged && i + 2 == 15 && n > 16) {
-            i = n - 2;
+            i = mesh.numBvhNodes - 2;
             printf("... ");
         }
 
@@ -691,7 +836,7 @@ void Scene::buildBVH(Mesh& mesh) {
     printf("\n");
     for (int i = 0; i < mesh.indCount; i++) {
         if (abridged && i + 2 == 15 && n > 16) {
-            i = n - 2;
+            i = mesh.indCount - 2;
             printf("... ");
         }
 

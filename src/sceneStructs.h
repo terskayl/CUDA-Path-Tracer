@@ -174,6 +174,7 @@ struct RenderState
 {
     Camera camera;
     unsigned int iterations;
+    unsigned int currIteration = 0;
     int traceDepth;
     std::vector<glm::vec3> image;
     std::string imageName;
@@ -184,6 +185,8 @@ struct PathSegment
     Ray ray;
     glm::vec3 radiance;
     glm::vec3 throughput;
+    glm::vec3 firstAlbedo = glm::vec3(-1.f);
+    glm::vec3 firstNormal = glm::vec3(-1.f);
     int pixelIndex;
     int remainingBounces;
 };

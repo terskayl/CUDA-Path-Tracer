@@ -353,7 +353,14 @@ __device__ void scatterRay(
             aoRoughMetalMapReading.x,
             aoRoughMetalMapReading.y,
             aoRoughMetalMapReading.z);
+    }
 
+    // Save first bounce albedo and normal if not set
+    if (pathSegment.firstAlbedo == glm::vec3(-1.f)) {
+        pathSegment.firstAlbedo = color;
+    }
+    if (pathSegment.firstNormal == glm::vec3(-1.f)) {
+        pathSegment.firstNormal = normal;
     }
 
     if (aoRoughMetal.b >= 0.9) {

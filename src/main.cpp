@@ -5,6 +5,7 @@
 #include "sceneStructs.h"
 #include "utilities.h"
 #include "intersections.h"
+#include "json.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtx/transform.hpp>
@@ -679,20 +680,28 @@ int main(int argc, char** argv)
 
     if (argc < 2)
     {
-        printf("Usage: %s SCENEFILE.json\n", argv[0]);
+        printf("Usage: %s SCENEFILE.gtlf\n", argv[0]);
         return 1;
     }
 
     const char* sceneFile = argv[1];
+    if (argc < 4) {
+        // Load scene file
+        scene = new Scene(sceneFile);
+    }
+    else {
+        const char* imageFile = argv[2];
+        const char* renderStateJson = argv[3];
+        scene = new Scene(sceneFile, imageFile, renderStateJson);
+    }
 
-    // Load scene file
-    scene = new Scene(sceneFile);
 
     //Create Instance for ImGUIData
     guiData = new GuiDataContainer();
 
     // Set up camera stuff from loaded path tracer settings
-    iteration = 0;
+    iteration = scene->state.currIteration;
+
     renderState = &scene->state;
     Camera& cam = renderState->camera;
     width = cam.resolution.x;
@@ -728,7 +737,12 @@ int main(int argc, char** argv)
 
 #endif
 
-
+    // Checkpointing
+    if (scene->state.currIteration > 0) {
+        camchanged = false;
+        printf("Iteration loaded: %ui", scene->state.currIteration);
+        pathtraceInit(scene);
+    }
     // GLFW main loop
     mainLoop();
 
@@ -761,11 +775,73 @@ void saveImage()
     //img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
+inline void to_json(nlohmann::json& j, const Camera& c) {
+    j = nlohmann::json{
+        { "resolution",    { c.resolution.x, c.resolution.y } },
+        { "position",      { c.position.x, c.position.y, c.position.z } },
+        { "lookAt",        { c.lookAt.x, c.lookAt.y, c.lookAt.z } },
+        { "view",          { c.view.x, c.view.y, c.view.z } },
+        { "up",            { c.up.x, c.up.y, c.up.z } },
+        { "right",         { c.right.x, c.right.y, c.right.z } },
+        { "fov",           { c.fov.x, c.fov.y } },
+        { "pixelLength",   { c.pixelLength.x, c.pixelLength.y } }
+    };
+}
+
+inline void to_json(nlohmann::json& j, const RenderState& r) {
+    j = nlohmann::json{
+        { "camera",      r.camera },
+        { "iterations",  r.iterations },
+        { "currIteration",  r.currIteration },
+        { "traceDepth",  r.traceDepth },
+        { "imageName",   r.imageName }
+    };
+}
+void saveImageCheckpoint()
+{
+    float samples = iteration;
+    // output image file
+    Image img(width, height);
+
+    for (int x = 0; x < width; x++)
+    {
+        for (int y = 0; y < height; y++)
+        {
+            int index = x + (y * width);
+            glm::vec3 pix = renderState->image[index];
+            img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
+        }
+    }
+
+    std::string filename = renderState->imageName;
+    std::ostringstream ss;
+    ss << filename << "." << startTimeString << "." << samples << "samp";
+    filename = ss.str();
+
+    // CHECKITOUT
+    //img.savePNG(filename);
+    img.saveHDR(filename);
+
+    ss << ".json";
+    filename = ss.str();
+    nlohmann::json j = scene->state;
+
+    std::ofstream file(filename);
+    if (!file) {
+        throw std::runtime_error("Failed to open file for writing: " + filename);
+    }
+
+    file << j.dump(4); // pretty print with indent of 4 spaces
+    std::cout << "Saved " + filename + "." << std::endl;
+
+}
+
 void runCuda()
 {
     if (camchanged)
     {
         iteration = 0;
+        renderState->currIteration = 0;
         Camera& cam = renderState->camera;
         cameraPosition.x = zoom * sin(phi) * sin(theta);
         cameraPosition.y = zoom * cos(theta);
@@ -796,6 +872,7 @@ void runCuda()
     if (iteration < renderState->iterations)
     {
         uchar4* pbo_dptr = NULL;
+        scene->state.currIteration = iteration;
         iteration++;
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
@@ -831,6 +908,9 @@ void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods
                 break;
             case GLFW_KEY_S:
                 saveImage();
+                break;
+            case GLFW_KEY_C:
+                saveImageCheckpoint();
                 break;
             case GLFW_KEY_SPACE:
                 camchanged = true;
