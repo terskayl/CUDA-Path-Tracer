@@ -388,7 +388,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     for (tinygltf::Material& mat : model.materials) {
         Material newMat;
         newMat.baseColor = doubleArrayToVec3(mat.pbrMetallicRoughness.baseColorFactor);
-        newMat.baseColorTexture = mat.pbrMetallicRoughness.baseColorTexture.index; // TODO: WE DO NOT SUPPORT UDIMS? SO WE WILL NOT RECORD "TEXCOORD"
+        newMat.baseColorTexture = mat.pbrMetallicRoughness.baseColorTexture.index;
         newMat.metallic = mat.pbrMetallicRoughness.metallicFactor;
         newMat.roughness = mat.pbrMetallicRoughness.roughnessFactor;
         newMat.metallicRoughnessTexture = mat.pbrMetallicRoughness.metallicRoughnessTexture.index;
@@ -396,7 +396,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
         if (mat.extensions.count("KHR_materials_specular") != 0) {
             auto specular = mat.extensions.find("KHR_materials_specular")->second;
             newMat.specular = specular.Get("specularFactor").GetNumberAsDouble();
-            //newMat.specularTint = specular.Get("specularColorFactor") // IDK HOW TO TAKE ARRAY
+            //newMat.specularTint = specular.Get("specularColorFactor")
         }
         if (mat.extensions.count("KHR_materials_ior") != 0) {
             newMat.ior = mat.extensions.find("KHR_materials_ior")->second.Get("ior").GetNumberAsDouble();
@@ -507,47 +507,49 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     bool cameraSet = false;
     // Loop through all nodes, then through meshes
     for (tinygltf::Node& node : model.nodes) {
-        Geom newGeom;
+        Geom newGeomTemplate;
 
         // Transforms
         if (node.translation.size()) {
-            newGeom.translation = glm::vec3(node.translation[0], node.translation[1], node.translation[2]);
+            newGeomTemplate.translation = glm::vec3(node.translation[0], node.translation[1], node.translation[2]);
         }
         if (node.rotation.size()) {
                                     // Quat wants WXYZ but gltf is XYZW
             glm::quat rot = glm::quat(node.rotation[3], node.rotation[0], node.rotation[1], node.rotation[2]);
-            newGeom.rotation = glm::eulerAngles(rot);
+            newGeomTemplate.rotation = glm::eulerAngles(rot);
             float invPi = 1.f / 3.1415926f;
-            newGeom.rotation.x *= 180.f * invPi;
-            newGeom.rotation.y *= 180.f * invPi;
-            newGeom.rotation.z *= 180.f * invPi;
+            newGeomTemplate.rotation.x *= 180.f * invPi;
+            newGeomTemplate.rotation.y *= 180.f * invPi;
+            newGeomTemplate.rotation.z *= 180.f * invPi;
         }
         if (node.scale.size()) {
-            newGeom.scale = glm::vec3(node.scale[0], node.scale[1], node.scale[2]);
+            newGeomTemplate.scale = glm::vec3(node.scale[0], node.scale[1], node.scale[2]);
         }
         if (node.matrix.size()) {
             std::vector<double> mat = node.matrix;
-            newGeom.transform = glm::mat4( mat[0],  mat[1],  mat[2],  mat[3],
+            newGeomTemplate.transform = glm::mat4( mat[0],  mat[1],  mat[2],  mat[3],
                                            mat[4],  mat[5],  mat[6],  mat[7],
                                            mat[8],  mat[9],  mat[10], mat[11],
                                            mat[12], mat[13], mat[14], mat[15] );
             glm::mat4 otherMat = utilityCore::buildTransformationMatrix(
-                newGeom.translation, newGeom.rotation, newGeom.scale);
+                newGeomTemplate.translation, newGeomTemplate.rotation, newGeomTemplate.scale);
             // TODO check this works
-            assert(otherMat == newGeom.transform);
+            assert(otherMat == newGeomTemplate.transform);
         }
 
-        newGeom.transform = utilityCore::buildTransformationMatrix(
-            newGeom.translation, newGeom.rotation, newGeom.scale);
-        newGeom.inverseTransform = glm::inverse(newGeom.transform);
-        newGeom.invTranspose = glm::inverseTranspose(newGeom.transform);
+        newGeomTemplate.transform = utilityCore::buildTransformationMatrix(
+            newGeomTemplate.translation, newGeomTemplate.rotation, newGeomTemplate.scale);
+        newGeomTemplate.inverseTransform = glm::inverse(newGeomTemplate.transform);
+        newGeomTemplate.invTranspose = glm::inverseTranspose(newGeomTemplate.transform);
         
         // TODO: what happens when the node doesn't have a mesh?
         if (node.mesh != -1) {
-            newGeom.type = MESH;
+            newGeomTemplate.type = MESH;
             tinygltf::Mesh mesh = model.meshes[node.mesh];
 
+            // Design choice - we will push back a mesh for each material slot
             for (tinygltf::Primitive& prim: mesh.primitives) {
+                Geom newGeom = newGeomTemplate;
                 newGeom.materialid = prim.material;
 
                 assert(prim.mode == 4); // GLTF encoding for TRIANGLES
@@ -648,6 +650,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
                     newGeom.mesh.indCount = count;
                     std::memcpy(newGeom.mesh.ind, buffer.data.data() + byteOffset, byteLength);
                 }
+                buildBVH(newGeom.mesh);
+
+                geoms.push_back(newGeom);
             }
 
             // TESTING
@@ -668,9 +673,6 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             //    std::cout << s << std::endl;
             //}
 
-            buildBVH(newGeom.mesh);
-
-            geoms.push_back(newGeom);
         }
 
         if (node.camera != -1) {
@@ -683,9 +685,9 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             state.iterations = 5000;
             state.traceDepth = 8;
             state.imageName = model.nodes[0].name; // Weird name
-            camera.position = newGeom.translation;
-            camera.view = glm::normalize(glm::vec3(newGeom.transform * glm::vec4(0.f, 0.f, -1.f, 0.f)));
-            camera.up = glm::normalize(glm::vec3(newGeom.transform * glm::vec4(0.f, 1.f, 0.f, 0.f)));
+            camera.position = newGeomTemplate.translation;
+            camera.view = glm::normalize(glm::vec3(newGeomTemplate.transform * glm::vec4(0.f, 0.f, -1.f, 0.f)));
+            camera.up = glm::normalize(glm::vec3(newGeomTemplate.transform * glm::vec4(0.f, 1.f, 0.f, 0.f)));
 
             //calculate fov based on resolution
             float yscaled = tan(fovy * (PI / 180));
@@ -749,17 +751,18 @@ void Scene::buildBVH(Mesh& mesh) {
 
     const int BVH_MAX_LAYERS = 20; // Also change in intersections.cu
     for (int i = 0; i < BVH_MAX_LAYERS; ++i) {
-        int layerSize = 0;
-        for (CpuBvhNode* nodePtr : nodesToProcess) {
+        int layerSize = nodesToProcess.size();;
+        for (int j = 0; j < layerSize; ++j) {
+            CpuBvhNode* nodePtr = nodesToProcess.at(j);
+
             auto [axisToSplit, splitPos] = findSplitPoint(nodePtr);
 
             std::vector<Triangle> bb1tris = std::vector<Triangle>();
             std::vector<Triangle> bb2tris = std::vector<Triangle>();
-            for (int j = 0; j < nodePtr->tri.size(); j++) {
-                Triangle currTri= nodePtr->tri[j];
-                glm::vec3 *pts = currTri.points;
-                glm::vec3 centroid = (pts[0] + pts[1] + pts[2]);
-                centroid /= 3;
+            assert(nodePtr->tri.size() < 1e9);
+
+            for (auto& currTri : nodePtr->tri) {
+                glm::vec3 centroid = (currTri.points[0] + currTri.points[1] + currTri.points[2]) / 3.0f;
 
                 if (centroid[axisToSplit] > splitPos) {
                     // put in 1
@@ -779,13 +782,15 @@ void Scene::buildBVH(Mesh& mesh) {
             auto [bb1MaxBounds, bb1MinBounds] = findBBoxOfTris(bb1tris);
             auto [bb2MaxBounds, bb2MinBounds] = findBBoxOfTris(bb2tris);
 
-            uPtr<CpuBvhNode>& lChild = std::make_unique<CpuBvhNode>(bb1tris);
-            uPtr<CpuBvhNode>& rChild = std::make_unique<CpuBvhNode>(bb2tris);
+            uPtr<CpuBvhNode> lChild = std::make_unique<CpuBvhNode>(bb1tris);
+            uPtr<CpuBvhNode> rChild = std::make_unique<CpuBvhNode>(bb2tris);
             lChild->maxBounds = bb1MaxBounds;
             lChild->minBounds = bb1MinBounds;
             rChild->maxBounds = bb2MaxBounds;
             rChild->minBounds = bb2MinBounds;
             
+            assert(bb1tris.size() < 1e9);
+            assert(bb2tris.size() < 1e9);
             lChild->tri = bb1tris;
             rChild->tri = bb2tris;
 
@@ -796,7 +801,8 @@ void Scene::buildBVH(Mesh& mesh) {
             nodePtr->lChild = std::move(lChild);
             nodePtr->rChild = std::move(rChild);
 
-            layerSize += 1;
+            assert(nodePtr->lChild->tri.size() < 1e9);
+            assert(nodePtr->rChild->tri.size() < 1e9);
         }
         for (int i = 0; i < layerSize; ++i) {
             nodesToProcess.pop_front();
