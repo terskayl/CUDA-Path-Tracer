@@ -293,6 +293,21 @@ void RenderImGui()
     //ImGui::Text("counter = %d", counter);
     ImGui::Text("Traced Depth %d", imguiData->TracedDepth);
     ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / ImGui::GetIO().Framerate, ImGui::GetIO().Framerate);
+
+    if (ImGui::CollapsingHeader("Options", ImGuiTreeNodeFlags_None))
+    {
+        ImGui::Checkbox("StreamCompaction", &renderState->doStreamCompaction);
+        ImGui::Checkbox("MaterialSorting", &renderState->doMaterialSorting);
+        ImGui::Checkbox("BVH", &renderState->doBVH);
+        ImGui::Checkbox("ACES", &renderState->doACES);
+        ImGui::Checkbox("Reinhard", &renderState->doReinhard);
+        ImGui::Checkbox("GammaCorrection", &renderState->doGammaCorrection);
+        ImGui::Checkbox("RussianRoulette", &renderState->doRussianRoulette);
+        ImGui::Checkbox("Denoising", &renderState->doDenoising);
+        ImGui::Checkbox("DenoisingOutput", &renderState->doDenoisingOutput);
+    }
+
+
     ImGui::End();
 
 

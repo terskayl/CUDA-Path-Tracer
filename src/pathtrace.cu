@@ -27,14 +27,6 @@
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 
-#define STREAMCOMPACTION 1
-#define MATERIALSORTING 1
-#define BVH 1;
-#define ACES 1;
-#define REINHARD 0;
-#define GAMMACORRECTION 1;
-#define RUSSIANROULETTE 1;
-#define OIDN 1;
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
@@ -67,7 +59,7 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
 }
 
 //Kernel that writes the image to the OpenGL PBO directly.
-__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image)
+__global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, bool doReinhard, bool doACES, bool doGammaCorrection)
 {
     int x = (blockIdx.x * blockDim.x) + threadIdx.x;
     int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -84,27 +76,28 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm
         pix.y /= iter;
         pix.z /= iter;
 
-#if REINHARD
-        // Reinhard Operator
-        pix.x = pix.x / (pix.x + 1);
-        pix.y = pix.y / (pix.y + 1);
-        pix.z = pix.z / (pix.z + 1);
-#endif
+        if (doReinhard) {
+            // Reinhard Operator
+            pix.x = pix.x / (pix.x + 1);
+            pix.y = pix.y / (pix.y + 1);
+            pix.z = pix.z / (pix.z + 1);
+        }
 
-#if ACES
-        float a = 2.51f;
-        float b = 0.03f;
-        float c = 2.43f;
-        float d = 0.59f;
-        float e = 0.14f;
-        pix = (pix * (a * pix + b)) / (pix * (c * pix + d) + e);
-#endif
+        if (doACES) {
+            float a = 2.51f;
+            float b = 0.03f;
+            float c = 2.43f;
+            float d = 0.59f;
+            float e = 0.14f;
+            pix = (pix * (a * pix + b)) / (pix * (c * pix + d) + e);
+        }
 
-#if GAMMACORRECTION
-        pix.x = glm::pow(pix.x, 1.0 / 2.2);
-        pix.y = glm::pow(pix.y, 1.0 / 2.2);
-        pix.z = glm::pow(pix.z, 1.0 / 2.2);
-#endif 
+        if (doGammaCorrection) {
+            pix.x = glm::pow(pix.x, 1.0 / 2.2);
+            pix.y = glm::pow(pix.y, 1.0 / 2.2);
+            pix.z = glm::pow(pix.z, 1.0 / 2.2);
+        }
+
         color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
         color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
         color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);;
@@ -492,7 +485,8 @@ __global__ void computeIntersections(
     ShadeableIntersection* intersections,
     int* isValidIntersection,
     DeviceTexture* textures,
-    int hdriIndex)
+    int hdriIndex,
+    bool doBVH)
 {
     int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -538,11 +532,12 @@ __global__ void computeIntersections(
             }
             else if (geom.type == MESH) {
 
-#if BVH
-                t = meshIntersectionTestBVH(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
-#else
-                t = meshIntersectionTestNaive(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
-#endif
+                if (doBVH) {
+                    t = meshIntersectionTestBVH(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
+                }
+                else {
+                    t = meshIntersectionTestNaive(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
+                }
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
 
@@ -612,7 +607,8 @@ __global__ void shadeFakeMaterial(
     ShadeableIntersection* shadeableIntersections,
     PathSegment* pathSegments,
     Material* materials,
-    DeviceTexture* textures)
+    DeviceTexture* textures,
+    bool doRussianRoulette)
 {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_paths)
@@ -648,16 +644,16 @@ __global__ void shadeFakeMaterial(
                 scatterRay(pathSegments[idx], pathSegments[idx].ray.direction * intersection.t + pathSegments[idx].ray.origin,
                     intersection.surfaceNormal, material, textures, intersection.uvCoord, intersection.surfaceTangent,
                     intersection.surfaceBitangent, rng);
-#if RUSSIANROULETTE
-                // Russian Roulette
-                float probDie = glm::clamp(glm::length(pathSegments[idx].throughput), 0.05f, 0.95f);
-                if (u01(rng) > probDie) {
-                    pathSegments[idx].remainingBounces = 0;
+                if (doRussianRoulette) {
+                    // Russian Roulette
+                    float probDie = glm::clamp(glm::length(pathSegments[idx].throughput), 0.05f, 0.95f);
+                    if (u01(rng) > probDie) {
+                        pathSegments[idx].remainingBounces = 0;
+                    }
+                    else {
+                        pathSegments[idx].throughput /= probDie;
+                    }
                 }
-                else {
-                    pathSegments[idx].throughput /= probDie;
-                }
-#endif
 
             }
             // If there was no intersection, color the ray black.
@@ -674,7 +670,7 @@ __global__ void shadeFakeMaterial(
 }
 
 // Add the current iteration's output to the overall image
-__global__ void finalGather(int nPaths, glm::vec3* image, glm::vec3* image_albedo, glm::vec3* image_normal, PathSegment* iterationPaths)
+__global__ void finalGather(int nPaths, glm::vec3* image, glm::vec3* image_albedo, glm::vec3* image_normal, PathSegment* iterationPaths, bool doDenoising)
 {
     int index = (blockIdx.x * blockDim.x) + threadIdx.x;
 
@@ -682,10 +678,10 @@ __global__ void finalGather(int nPaths, glm::vec3* image, glm::vec3* image_albed
     {
         PathSegment iterationPath = iterationPaths[index];
         image[iterationPath.pixelIndex] += iterationPath.throughput * iterationPath.radiance;
-#if OIDN
-        image_albedo[iterationPath.pixelIndex] = iterationPath.firstAlbedo;
-        image_normal[iterationPath.pixelIndex] = iterationPath.firstNormal;
-#endif 
+        if (doDenoising) {
+            image_albedo[iterationPath.pixelIndex] = iterationPath.firstAlbedo;
+            image_normal[iterationPath.pixelIndex] = iterationPath.firstNormal;
+        }
     }
 }
 
@@ -793,7 +789,8 @@ void pathtrace(uchar4* pbo, int frame, int iter)
             dev_intersections,
             dev_isValidIntersection,
             dev_textures,
-            hst_scene->hdriIndex
+            hst_scene->hdriIndex,
+            hst_scene->state.doBVH
             );
         checkCUDAError("trace one bounce");
         cudaDeviceSynchronize();
@@ -831,12 +828,12 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         //}
         //std::cout << std::endl;
 
-#if STREAMCOMPACTION
-        num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_paths, dev_isValidIntersection, dev_intersections);
-        numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        checkCUDAError("partition on intersect");
-        if (num_paths == 0) break;
-#endif
+        if (hst_scene->state.doStreamCompaction) {
+            num_paths = StreamCompaction::Efficient::partitionOnValidIntersect(num_paths, dev_paths, dev_isValidIntersection, dev_intersections);
+            numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+            checkCUDAError("partition on intersect");
+            if (num_paths == 0) break;
+        }
 
 
         //ShadeableIntersection* intersections = new ShadeableIntersection[num_paths];
@@ -856,40 +853,40 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         // materials you have in the scenefile.
         // TODO: compare between directly shading the path segments and shading
         // path segments that have been reshuffled to be contiguous in memory.
-#if MATERIALSORTING
-        thrust::device_ptr<ShadeableIntersection> dev_thrust_intersections(dev_intersections);
-        thrust::device_ptr<PathSegment> dev_thrust_paths(dev_paths);
+        if (hst_scene->state.doMaterialSorting) {
+            thrust::device_ptr<ShadeableIntersection> dev_thrust_intersections(dev_intersections);
+            thrust::device_ptr<PathSegment> dev_thrust_paths(dev_paths);
 
-        //auto zip_begin = thrust::make_zip_iterator(thrust::make_tuple(dev_thrust_intersections, dev_thrust_paths));
-        //auto zip_end = thrust::make_zip_iterator(thrust::make_tuple(dev_thrust_intersections + num_paths, dev_thrust_paths + num_paths));
-        
-        thrust::device_vector<int> d_keys(num_paths);
-        thrust::device_vector<int> d_keys2(num_paths);
+            //auto zip_begin = thrust::make_zip_iterator(thrust::make_tuple(dev_thrust_intersections, dev_thrust_paths));
+            //auto zip_end = thrust::make_zip_iterator(thrust::make_tuple(dev_thrust_intersections + num_paths, dev_thrust_paths + num_paths));
 
-        // thrust::transform extracts materialId from dev_intersections, and makes two copies
-        thrust::transform(dev_thrust_intersections, dev_thrust_intersections + num_paths, d_keys.begin(), GetKey());
-        thrust::transform(dev_thrust_intersections, dev_thrust_intersections + num_paths, d_keys2.begin(), GetKey());
+            thrust::device_vector<int> d_keys(num_paths);
+            thrust::device_vector<int> d_keys2(num_paths);
 
-        thrust::sort_by_key(d_keys.begin(), d_keys.end(), dev_thrust_paths);//zip_begin); ZIP IS SLOWER I THINK, TODO - check
-        thrust::sort_by_key(d_keys2.begin(), d_keys2.end(), dev_thrust_intersections);
+            // thrust::transform extracts materialId from dev_intersections, and makes two copies
+            thrust::transform(dev_thrust_intersections, dev_thrust_intersections + num_paths, d_keys.begin(), GetKey());
+            thrust::transform(dev_thrust_intersections, dev_thrust_intersections + num_paths, d_keys2.begin(), GetKey());
 
-#endif
+            thrust::sort_by_key(d_keys.begin(), d_keys.end(), dev_thrust_paths);//zip_begin); ZIP IS SLOWER I THINK, TODO - check
+            thrust::sort_by_key(d_keys2.begin(), d_keys2.end(), dev_thrust_intersections);
+        }
+
         shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>>(
             iter,
             num_paths,
             dev_intersections,
             dev_paths,
             dev_materials,
-            dev_textures
+            dev_textures,
+            hst_scene->state.doRussianRoulette
         );
         checkCUDAError("shading");
 
-#if STREAMCOMPACTION
-        num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_paths);
-        numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
-        checkCUDAError("partition on bounces");
-
-#endif
+        if (hst_scene->state.doStreamCompaction) {
+            num_paths = StreamCompaction::Efficient::partitionOnBounces(num_paths, dev_paths);
+            numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+            checkCUDAError("partition on bounces");
+        }
 
 
         //PathSegment* paths = new PathSegment[num_paths];
@@ -914,53 +911,61 @@ void pathtrace(uchar4* pbo, int frame, int iter)
 
     // Assemble this iteration and apply it to the image
     dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-    finalGather<<<numBlocksPixels, blockSize1d>>>(pixelcount, dev_image, dev_image_albedo, dev_image_normal, dev_paths);
+    finalGather<<<numBlocksPixels, blockSize1d>>>(pixelcount, dev_image, dev_image_albedo, dev_image_normal, dev_paths, hst_scene->state.doDenoising);
 
-# if OIDN
-    // denoise with OIDN
-    oidn::DeviceRef device = oidn::newCUDADevice(0, NULL);
-    device.commit();
+    if (hst_scene->state.doDenoising) {
+        // denoise with OIDN
+        oidn::DeviceRef device = oidn::newCUDADevice(0, NULL);
+        device.commit();
 
-    // Setup buffers
-    oidn::BufferRef colorBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
-    oidn::BufferRef albedoBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
-    oidn::BufferRef normalBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
-    oidn::BufferRef outputBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+        // Setup buffers
+        oidn::BufferRef colorBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+        oidn::BufferRef albedoBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+        oidn::BufferRef normalBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
+        oidn::BufferRef outputBuf = device.newBuffer(pixelcount * 3 * sizeof(float));
 
-    cudaMemcpy(colorBuf.getData(), dev_image, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(albedoBuf.getData(), dev_image_albedo, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
-    cudaMemcpy(normalBuf.getData(), dev_image_normal, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(colorBuf.getData(), dev_image, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(albedoBuf.getData(), dev_image_albedo, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
+        cudaMemcpy(normalBuf.getData(), dev_image_normal, pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
 
-    oidn::FilterRef filter = device.newFilter("RT"); // ray tracing filter
-    filter.setImage("color", colorBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
-    filter.setImage("albedo", albedoBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
-    filter.setImage("normal", normalBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
-    filter.setImage("output", outputBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
-    filter.set("hdr", true);
-    filter.commit();
+        oidn::FilterRef filter = device.newFilter("RT"); // ray tracing filter
+        filter.setImage("color", colorBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+        filter.setImage("albedo", albedoBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+        filter.setImage("normal", normalBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+        filter.setImage("output", outputBuf, oidn::Format::Float3, cam.resolution.x, cam.resolution.y);
+        filter.set("hdr", true);
+        filter.commit();
 
-    filter.execute();
+        filter.execute();
 
-    const char* errorMessage;
-    if (device.getError(errorMessage) != oidn::Error::None) {
-        printf("Error: ");
-        printf(errorMessage);
+        const char* errorMessage;
+        if (device.getError(errorMessage) != oidn::Error::None) {
+            printf("Error: ");
+            printf(errorMessage);
+        }
+
+        cudaMemcpy(dev_image_denoised, outputBuf.getData(), pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
     }
-
-    cudaMemcpy(dev_image_denoised, outputBuf.getData(), pixelcount * 3 * sizeof(float), cudaMemcpyDeviceToDevice);
-#endif
 
     ///////////////////////////////////////////////////////////////////////////
 
     // Send results to OpenGL buffer for rendering
-#if OIDN
-    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image_denoised);
-#else
-    sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);
-#endif
+    if (hst_scene->state.doDenoising){
+        sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image_denoised, hst_scene->state.doReinhard, hst_scene->state.doACES, hst_scene->state.doGammaCorrection);
+    }
+    else {
+        sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image, hst_scene->state.doReinhard, hst_scene->state.doACES, hst_scene->state.doGammaCorrection);
+    }
+
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_image,
-        pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    if (hst_scene->state.doDenoising && hst_scene->state.doDenoisingOutput) {
+        cudaMemcpy(hst_scene->state.image.data(), dev_image_denoised,
+            pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    }
+    else {
+        cudaMemcpy(hst_scene->state.image.data(), dev_image,
+            pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    }
 
     checkCUDAError("pathtrace");
 }

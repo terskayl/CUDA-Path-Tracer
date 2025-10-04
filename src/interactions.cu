@@ -71,10 +71,10 @@ __host__ __device__ void sampleAndResolveSpecularRefl(
     glm::vec3 color,
     thrust::default_random_engine& rng) {
 
-    float epsilon = 1e-3;
+    float epsilon = 1e-2;
     // Needs some extra help when normal mapping is on
     if (m.normalTexture != -1) {
-        epsilon = 1e-2;
+        epsilon = 1e-1;
     }
 
     bool isEntering = dot(normal, pathSegment.ray.direction) < 0;
@@ -107,10 +107,10 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     float etaB = 1.4f;// m.ior;
     float eta;
 
-    float epsilon = 1e-3;
+    float epsilon = 1e-2;
     // Needs some extra help when normal mapping is on
     if (m.normalTexture != -1) {
-        epsilon = 1e-2;
+        epsilon = 1e-1;
     }
 
     if (isEntering) {
@@ -152,10 +152,10 @@ __host__ __device__ void sampleAndResolveSpecularTransSpectrum(
     glm::vec3 etaB = glm::vec3(1.4f, 1.45f, 1.5f);// glm::vec3(m.ior, m.ior + 0.05, m.ior + 0.1);
     float eta;
 
-    float epsilon = 1e-3;
+    float epsilon = 1e-2;
     // Needs some extra help when normal mapping is on
     if (m.normalTexture != -1) {
-        epsilon = 1e-2;
+        epsilon = 1e-1;
     }
 
     thrust::uniform_real_distribution<float> u01(0, 1);

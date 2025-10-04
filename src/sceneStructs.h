@@ -178,6 +178,15 @@ struct RenderState
     int traceDepth;
     std::vector<glm::vec3> image;
     std::string imageName;
+    bool doStreamCompaction = true;
+    bool doMaterialSorting = true;
+    bool doBVH = true;
+    bool doACES = true;
+    bool doReinhard;
+    bool doGammaCorrection = true;
+    bool doRussianRoulette = true;
+    bool doDenoising;
+    bool doDenoisingOutput;
 };
 
 struct PathSegment
