@@ -26,8 +26,8 @@ struct BvhNode
 {
     glm::vec3 maxBounds;
     glm::vec3 minBounds;
-    unsigned short leftChild;
-    unsigned short rightChild;
+    int leftChild;
+    int rightChild;
     // In num floats, so offset / 3 = triangle count
     int trisOffset;
     // In num floats, so 3 * triangle count

@@ -34,7 +34,7 @@
 #define REINHARD 0;
 #define GAMMACORRECTION 1;
 #define RUSSIANROULETTE 1;
-#define OIDN 0;
+#define OIDN 1;
 
 void checkCUDAErrorFn(const char* msg, const char* file, int line)
 {
@@ -541,7 +541,7 @@ __global__ void computeIntersections(
 #if BVH
                 t = meshIntersectionTestBVH(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
 #else
-                t = meshIntersectionTestNaive(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, outside);
+                t = meshIntersectionTestNaive(geom, pathSegment.ray, tmp_intersect, tmp_normal, tmp_uv, tmp_tangent, tmp_bitangent, outside);
 #endif
             }
             // TODO: add more intersection tests here... triangle? metaball? CSG?
@@ -782,6 +782,7 @@ void pathtrace(uchar4* pbo, int frame, int iter)
         }
         // tracing
         dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+        checkCUDAError("pre-intersection");
 
         computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
             depth,

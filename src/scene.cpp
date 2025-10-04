@@ -690,7 +690,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
             camera.up = glm::normalize(glm::vec3(newGeomTemplate.transform * glm::vec4(0.f, 1.f, 0.f, 0.f)));
 
             //calculate fov based on resolution
-            float yscaled = tan(fovy * (PI / 180));
+            float yscaled = tan(fovy / 2); // GLTF fovy already in Rad, so no need to convert
             float xscaled = (yscaled * camera.resolution.x) / camera.resolution.y;
             float fovx = (atan(xscaled) * 180) / PI;
             camera.fov = glm::vec2(fovx, fovy);
@@ -749,7 +749,7 @@ void Scene::buildBVH(Mesh& mesh) {
 
     nodesToProcess.push_back(root.get());
 
-    const int BVH_MAX_LAYERS = 20; // Also change in intersections.cu
+    const int BVH_MAX_LAYERS = 15; // Also change in intersections.cu
     for (int i = 0; i < BVH_MAX_LAYERS; ++i) {
         int layerSize = nodesToProcess.size();;
         for (int j = 0; j < layerSize; ++j) {

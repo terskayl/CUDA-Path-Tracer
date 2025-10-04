@@ -379,7 +379,7 @@ __device__ void scatterRay(
     else if (m.transmission > 0) {
         sampleAndResolveGlass(pathSegment, intersect, normal, m, color, rng);
     }
-    else if (aoRoughMetal.g < 0.99) {
+    else if (aoRoughMetal.g < 0.01) {
         sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
     }
     else if (aoRoughMetal.g > 0.99) {

@@ -359,7 +359,7 @@ __host__ __device__ float meshIntersectionTestBVH(
     
     assert(mesh.numBvhNodes > 0);
     // DFS
-    const int MAX_BVH_DEPTH = 20; // Also change in scene.cpp
+    const int MAX_BVH_DEPTH = 15; // Also change in scene.cpp
     unsigned short stack[MAX_BVH_DEPTH];
     stack[0] = 0;
     int stackIdx = 0;
@@ -374,8 +374,8 @@ __host__ __device__ float meshIntersectionTestBVH(
 
         // Nodes should either have two children or none.
 
-        //assert((currNode.leftChild <= 0 && currNode.rightChild <= 0) ||
-        //    (currNode.leftChild > 0 && currNode.rightChild > 0));
+        assert((currNode.leftChild <= 0 && currNode.rightChild <= 0) ||
+            (currNode.leftChild > 0 && currNode.rightChild > 0));
         // nodes set their child values to 0 when they are a leaf,
         // as index 0 cannot be a child
         if (currNode.leftChild > 0 && currNode.rightChild > 0) {
