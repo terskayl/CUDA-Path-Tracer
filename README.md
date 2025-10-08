@@ -126,7 +126,7 @@ The color space rays calculate is in linear HDR, which presents two problems. Fi
 
 |Gamma Correction| Reinhard + Gamma Correction| ACES + Gamma Correction|
 |-|-|-|
-| ![](img/Gamma.png)| ![](img\ReinhardGamma.png) |![](img/AcesGamma.png) |
+| ![](img/Gamma.png)| ![](img/ReinhardGamma.png) |![](img/AcesGamma.png) |
 
 ## Performance Optimizations
 
@@ -211,10 +211,12 @@ Additional thanks to the 4610 Rendering Course at Penn for giving me a solid fou
 
 This repo included third party code from STBI, tinygltf, and OIDN.
 
-Additional Resources used include:
-The PBRT: https://www.pbr-book.org/4ed/contents
-Jbikker's BVH blog: https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/
-Sebastian Lague's videos on Raytracing, BVHs, and Specular Materials https://www.youtube.com/c/SebastianLague
+All models used are my own.
+
+Additional Resources used include:  
+The PBRT: https://www.pbr-book.org/4ed/contents  
+Jbikker's BVH blog: https://jacco.ompf2.com/2022/04/13/how-to-build-a-bvh-part-1-basics/  
+Sebastian Lague's videos on Raytracing, BVHs, and Specular Materials https://www.youtube.com/c/SebastianLague  
 
 
 ### Bloopers
