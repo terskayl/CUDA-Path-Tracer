@@ -12,16 +12,16 @@ CUDA Path Tracer
 This repository contatains a Monte Carlo pathtracer implemented in C++ and CUDA and supporting Global Illumination with a variety of materials, GLTF mesh loading, all while being parallelly optimized for the GPU.
 
 ### Gallery
-| Fox Den |
+| Fox Den \| 824,502 Tris \| 131 Objects \| 500 spp \| 800x800|
 |-|
 |![](img/FoxDen.png)|
 
 
-| Basket |
+| Basket \| 416,604 Tris \| 40 Objects \| 500 spp \| 800x800|
 |-|
 |![](img/Gamma.png)|
 
-| Bake-Kujira |
+| Bake-Kujira \|2,075,928 Tris \| 37 Objects \| 500 spp \| 800x800 |
 |-|
 |![](img/Bake-Kujira.png)|
 
