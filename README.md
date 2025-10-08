@@ -21,7 +21,7 @@ This repository contatains a Monte Carlo pathtracer implemented in C++ and CUDA 
 |-|
 |![](img/Gamma.png)|
 
-| Bake-Kujira \|2,075,928 Tris \| 37 Objects \| 500 spp \| 800x800 |
+| Bake-Kujira \| 2,075,928 Tris \| 37 Objects \| 500 spp \| 800x800 |
 |-|
 |![](img/Bake-Kujira.png)|
 
