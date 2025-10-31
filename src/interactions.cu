@@ -87,7 +87,7 @@ __host__ __device__ void sampleAndResolveSpecularRefl(
 
     glm::vec3 dir = pathSegment.ray.direction;
     pathSegment.ray.direction = dir - 2 * glm::dot(dir, normal) * normal;
-    pathSegment.throughput *= m.baseColor;
+    pathSegment.throughput *= color;
 }
 
 
@@ -133,7 +133,7 @@ __host__ __device__ void sampleAndResolveSpecularTrans(
     }
 
     pathSegment.ray.direction = reflectedDir;
-    pathSegment.throughput *= m.baseColor;
+    pathSegment.throughput *= color;
     return;
 }
 
@@ -149,7 +149,7 @@ __host__ __device__ void sampleAndResolveSpecularTransSpectrum(
     bool isEntering = (dot(normal, w_i) < 0);
 
     glm::vec3 etaA = glm::vec3(1., 1.02, 1.04);
-    glm::vec3 etaB = glm::vec3(1.4f, 1.45f, 1.5f);// glm::vec3(m.ior, m.ior + 0.05, m.ior + 0.1);
+    glm::vec3 etaB = glm::vec3(1.4f, 1.5f, 1.6f);// glm::vec3(m.ior, m.ior + 0.05, m.ior + 0.1);
     float eta;
 
     float epsilon = 1e-2;
@@ -321,20 +321,24 @@ __device__ void scatterRay(
     // Glass fails at epsilon 1e-5.
     float epsilon = 1e-3;
     // Add normal map to normals if applicable.
-    if (m.normalTexture != -1) {
+
+    glm::vec3 color = m.baseColor;
+    if ( m.normalTexture != -1) {
         cudaTextureObject_t normalTexture = texArr[m.normalTexture].texHandle;
 
-        float4 normalMapReading = tex2D<float4>(normalTexture, uv.x, uv.y);
-        glm::vec3 normalDiff = (glm::vec3(normalMapReading.x, normalMapReading.y, normalMapReading.z) * 2.f) - glm::vec3(-1.f);
+        float4 normalMapReading = tex2D<float4>(1, uv.x, uv.y);
+        glm::vec3 normalDiff = (glm::vec3(normalMapReading.x, normalMapReading.y, normalMapReading.z) * 2.f);
 
-        normalDiff.x *= m.normalTextureScale;
-        normalDiff.y *= m.normalTextureScale;
+
+        normalDiff.x *= 5;//m.normalTextureScale;
+        normalDiff.y *= 5;//m.normalTextureScale;
         normalDiff = glm::normalize(normalDiff);
+        color = normalDiff;//m.baseColor;
 
         normal = normal * normalDiff.b, tangent * normalDiff.r + bitangent * normalDiff.g;
     }
 
-    glm::vec3 color = m.baseColor;
+    //glm::vec3 color = normalDiff;//m.baseColor;
     if (m.baseColorTexture != -1) {
         cudaTextureObject_t colorTexture = texArr[m.baseColorTexture].texHandle;
 
@@ -344,8 +348,8 @@ __device__ void scatterRay(
             colorMapReading.y,
             colorMapReading.z);
     }
-    glm::vec3 aoRoughMetal = glm::vec3(0.0, m.roughness, m.metallic);
-    if(m.metallicRoughnessTexture != -1) {
+    glm::vec3 aoRoughMetal = glm::vec3(0.0, m.roughness, 0.0);
+    if( m.metallicRoughnessTexture != -1) {
         cudaTextureObject_t aoRoughMetalTexture = texArr[m.metallicRoughnessTexture].texHandle;
 
         float4 aoRoughMetalMapReading = tex2D<float4>(aoRoughMetalTexture, uv.x, uv.y);
@@ -394,7 +398,7 @@ __device__ void scatterRay(
             sampleAndResolveDiffuse(pathSegment, intersect, normal, m, color, rng);
         }
         else {
-            sampleAndResolveSpecularRefl(pathSegment, intersect, normal, m, color, rng);
+            sampleAndResolveDiffuse(pathSegment, intersect, normal, m, color, rng);
         }
 
     }

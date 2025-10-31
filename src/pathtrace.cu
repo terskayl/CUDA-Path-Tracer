@@ -58,6 +58,65 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
     return thrust::default_random_engine(h);
 }
 
+
+__global__ void postProcess(glm::ivec2 resolution, int iter, glm::vec3* image, bool doReinhard, bool doACES, bool doGammaCorrection) {
+    int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+    int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+    if (x < resolution.x && y < resolution.y)
+    {
+        int index = x + (y * resolution.x);
+        glm::vec3 pix = image[index];
+
+        glm::vec3 color;
+        glm::vec3 postReinhard;
+
+        pix.x /= iter;
+        pix.y /= iter;
+        pix.z /= iter;
+
+        if (doReinhard) {
+            // Reinhard Operator
+            pix.x = pix.x / (pix.x + 1);
+            pix.y = pix.y / (pix.y + 1);
+            pix.z = pix.z / (pix.z + 1);
+        }
+
+        if (doACES) {
+            float a = 2.51f;
+            float b = 0.03f;
+            float c = 2.43f;
+            float d = 0.59f;
+            float e = 0.14f;
+            pix = (pix * (a * pix + b)) / (pix * (c * pix + d) + e);
+        }
+
+        if (doGammaCorrection) {
+            pix.x = glm::pow(pix.x, 1.0 / 2.2);
+            pix.y = glm::pow(pix.y, 1.0 / 2.2);
+            pix.z = glm::pow(pix.z, 1.0 / 2.2);
+        }
+
+        image[index] = pix;
+    }
+}
+
+void launchPostProcess(RenderState* renderState, int samples, int width, int height, std::vector<glm::vec3>& output) {
+    const dim3 blockSize2d(8, 8);
+    const dim3 blocksPerGrid2d(
+        (renderState->camera.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+        (renderState->camera.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+   
+    glm::vec3* dev_image;
+    cudaMalloc((void**)&dev_image, width * height * sizeof(glm::vec3));
+    cudaMemcpy(dev_image, renderState->image.data(), width * height * sizeof(glm::vec3), cudaMemcpyHostToDevice);
+    postProcess<<<blocksPerGrid2d, blockSize2d>>>(renderState->camera.resolution, samples, dev_image, renderState->doReinhard, renderState->doACES, renderState->doGammaCorrection);
+
+    cudaMemcpy(output.data(), dev_image, width * height * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    cudaFree(dev_image);
+}
+
+
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image, bool doReinhard, bool doACES, bool doGammaCorrection)
 {
@@ -447,7 +506,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 
         // DOF implementation
         //TODO: attach to ui
-        float focal_distance = 2.f;
+        float focal_distance = 3.2f;
         glm::vec3 target = cam.view
             - cam.right * cam.pixelLength.x * ((float)x - (float)cam.resolution.x * 0.5f)
             - cam.up * cam.pixelLength.y * ((float)y - (float)cam.resolution.y * 0.5f)
@@ -456,7 +515,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
         target *= focal_distance;
 
         //TODO: attach to ui
-        float dofScale = 0.0f;
+        float dofScale = 0.00f;
         glm::vec3 posOffset = dofScale * cam.right * (u01(rng) - 0.5f)
             + dofScale * cam.up * (u01(rng) - 0.5f);
         

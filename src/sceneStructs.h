@@ -185,7 +185,7 @@ struct RenderState
     bool doReinhard;
     bool doGammaCorrection = true;
     bool doRussianRoulette = true;
-    bool doDenoising;
+    bool doDenoising = true;
     bool doDenoisingOutput;
 };
 

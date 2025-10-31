@@ -454,7 +454,7 @@ bool Scene::loadFromGLTF(const std::string& gltfName, bool isBinary)
     // READ HDRI
     // TODO : Connect to UI
     int x = 0, y = 0, channels = 0;
-    float* hdriData = stbi_loadf("C:/Users/njbhv/Documents/Code/CIS5650/Project3-CUDA-Path-Tracer/scenes/passendorf_snow_1k.hdr", &x, &y, &channels, 0);
+    float* hdriData = stbi_loadf("C:/Users/njbhv/Documents/Code/CIS5650/Project3-CUDA-Path-Tracer/scenes/sunset_fairway_4k.hdr", &x, &y, &channels, 0);
     if (x == 0 || y == 0) {
 
     }

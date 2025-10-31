@@ -764,18 +764,28 @@ int main(int argc, char** argv)
     return 0;
 }
 
+
+
 void saveImage()
 {
     float samples = iteration;
     // output image file
     Image img(width, height);
 
+
+
+    std::vector<glm::vec3> output;
+    output.resize(width * height);
+    launchPostProcess(renderState, samples, width, height, output);
+
+
+
     for (int x = 0; x < width; x++)
     {
         for (int y = 0; y < height; y++)
         {
             int index = x + (y * width);
-            glm::vec3 pix = renderState->image[index];
+            glm::vec3 pix = output[index];
             img.setPixel(width - 1 - x, y, glm::vec3(pix) / samples);
         }
     }
